@@ -70,5 +70,21 @@
 				<SimpleValue>Otros</SimpleValue>
 			</Value>
 		</Row>
+		<Row>
+			<Value ColumnRef="code">
+				<SimpleValue>6</SimpleValue>
+			</Value>
+			<Value ColumnRef="name">
+				<SimpleValue>Descuento por pronto pago</SimpleValue>
+			</Value>
+		</Row>
+		<Row>
+			<Value ColumnRef="code">
+				<SimpleValue>7</SimpleValue>
+			</Value>
+			<Value ColumnRef="name">
+				<SimpleValue>Descuento comercial por volumen de ventas</SimpleValue>
+			</Value>
+		</Row>
 	</SimpleCodeList>
 </gc:CodeList>

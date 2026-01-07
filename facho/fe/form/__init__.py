@@ -21,13 +21,38 @@ class AmountCurrencyError(TypeError):
 
 @dataclass
 class Currency:
+    """
+    Clase para representar monedas según ISO 4217.
+    Validada contra el codelist TipoMoneda de la DIAN.
+
+    Anexo 1.9: Soporta monedas para exportaciones multi-moneda.
+    """
     code: str
 
+    def __post_init__(self):
+        if self.code not in codelist.TipoMoneda:
+            raise ValueError(f"currency code [{self.code}] not found in TipoMoneda codelist")
+
     def __eq__(self, other):
-        return self.code == other.code
+        if isinstance(other, Currency):
+            return self.code == other.code
+        return False
 
     def __str__(self):
         return self.code
+
+    @property
+    def name(self):
+        """Retorna el nombre de la moneda según el codelist"""
+        return codelist.TipoMoneda[self.code]['name']
+
+    def is_cop(self):
+        """Verifica si la moneda es Peso Colombiano"""
+        return self.code == 'COP'
+
+    def is_foreign(self):
+        """Verifica si la moneda es extranjera (para exportaciones)"""
+        return self.code != 'COP'
 
 class Collection:
 
@@ -565,16 +590,126 @@ class Invoice:
         self.invoice_billing_reference = None
         self.invoice_type_code = str(type_code)
         self.invoice_ident_prefix = None
+        # Anexo 1.9: Soporte multi-moneda para exportaciones
+        self.invoice_document_currency = Currency('COP')
+        self.invoice_calculation_rate = None  # Tasa de cambio para exportaciones
+        self.invoice_calculation_rate_date = None  # Fecha de tasa de cambio
+
+    def set_document_currency(self, currency: Currency):
+        """
+        Establece la moneda del documento.
+
+        Anexo 1.9: Soporte multi-moneda para exportaciones.
+        Para exportaciones (operación tipo 04), se puede usar
+        una moneda diferente a COP.
+
+        Args:
+            currency: Currency con el código de moneda ISO 4217
+
+        Raises:
+            TypeError: Si currency no es una instancia de Currency
+        """
+        if not isinstance(currency, Currency):
+            raise TypeError("currency must be a Currency instance")
+        self.invoice_document_currency = currency
+
+    def set_calculation_rate(self, rate: float, rate_date: date = None):
+        """
+        Establece la tasa de cambio para exportaciones.
+
+        Anexo 1.9: Para facturas de exportación con moneda extranjera,
+        se debe especificar la tasa de cambio respecto al COP.
+
+        Args:
+            rate: Tasa de cambio (COP por unidad de moneda extranjera)
+            rate_date: Fecha de la tasa de cambio (si None, usa la fecha de emisión)
+
+        Raises:
+            ValueError: Si la tasa es negativa o cero
+        """
+        if rate <= 0:
+            raise ValueError("calculation_rate must be positive")
+        self.invoice_calculation_rate = rate
+        self.invoice_calculation_rate_date = rate_date
+
+    def is_export_invoice(self):
+        """
+        Verifica si la factura es de exportación.
+
+        Returns:
+            bool: True si es factura de exportación (operación tipo 04)
+        """
+        return self.invoice_operation_type == '04'
+
+    def is_multi_currency(self):
+        """
+        Verifica si la factura usa moneda extranjera.
+
+        Returns:
+            bool: True si la moneda del documento no es COP
+        """
+        return self.invoice_document_currency.is_foreign()
 
     def set_period(self, startdate, enddate):
         self.invoice_period_start = startdate
         self.invoice_period_end = enddate
 
     def set_issue(self, dtime: datetime):
+        """
+        Establece la fecha de emisión del documento.
+
+        Anexo 1.9: Validación de fechas (elaboración = envío)
+        - La fecha de emisión debe estar en zona horaria Colombia (UTC-05:00)
+        - La fecha no puede ser futura
+        - Se valida el formato datetime
+
+        Args:
+            dtime: datetime con la fecha y hora de emisión
+
+        Raises:
+            ValueError: Si la zona horaria no es UTC-05:00 o la fecha es inválida
+            TypeError: Si dtime no es un datetime
+        """
+        if not isinstance(dtime, datetime):
+            raise TypeError("dtime must be a datetime instance")
+
         if dtime.tzname() not in ['UTC-05:00', '-05', None]:
-            raise ValueError("dtime must be UTC-05:00")
+            raise ValueError("dtime must be UTC-05:00 (Colombia timezone)")
+
+        # Anexo 1.9: Validar que la fecha no sea futura
+        now = datetime.now()
+        if dtime.replace(tzinfo=None) > now:
+            raise ValueError("dtime cannot be in the future")
 
         self.invoice_issue = dtime
+
+    def validate_issue_date_for_submission(self, submission_date: datetime = None):
+        """
+        Valida que la fecha de elaboración sea válida para el envío.
+
+        Anexo 1.9: La fecha de elaboración debe coincidir con la fecha de envío
+        para documentos que requieren esta validación.
+
+        Args:
+            submission_date: Fecha de envío (si None, usa datetime.now())
+
+        Returns:
+            bool: True si la fecha es válida para envío
+
+        Raises:
+            ValueError: Si la fecha de emisión no está configurada
+        """
+        if self.invoice_issue is None:
+            raise ValueError("invoice_issue must be set before validation")
+
+        if submission_date is None:
+            submission_date = datetime.now()
+
+        # Comparar solo la fecha (sin hora)
+        issue_date = self.invoice_issue.date()
+        submit_date = submission_date.date() if isinstance(submission_date, datetime) else submission_date
+
+        return issue_date == submit_date
 
     def _set_ident_prefix_automatic(self):
         if not self.invoice_ident_prefix:
