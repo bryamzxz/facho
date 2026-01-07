@@ -15,17 +15,18 @@ with open('HISTORY.rst') as history_file:
 
 requirements = ['Click>=6.0',
                 'chardet>=0.0',
-                'zeep==4.0.0',
-                'lxml==4.6.3',
-                'cryptography==3.3.2',
-                'pyOpenSSL==20.0.1',
+                'zeep==4.2.1',
+                'lxml==5.2.2',
+                'cryptography==42.0.8',
+                'pyOpenSSL==24.1.0',
                 'xmlsig==0.1.7',
-                'xades==0.2.2',
-                'xmlsec==1.3.12',
+                'xades==0.2.4',
+                'xmlsec==1.3.14',
                 # usamos esta dependencia en runtime
                 # para forzar uso de policy_id de archivo local
                 'mock>=2.0.0',
-                'xmlschema>=1.8']
+                'xmlschema>=1.8',
+                'python-dateutil==2.9.0.post0']
 
 setup_requirements = ['pytest-runner', ]
 
@@ -40,10 +41,10 @@ setup(
         'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
         'Natural Language :: English',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
     description="Facturacion Electronica Colombia",
     entry_points={

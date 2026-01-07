@@ -79,7 +79,8 @@ TipoOrganizacion = CodeList(path_for_codelist('TipoOrganizacion-2.1.gc'), 'code'
 TipoResponsabilidad = CodeList(path_for_codelist('TipoResponsabilidad-2.1.gc'), 'code', 'name')\
     .update(CodeList(path_for_codelist('TipoResponsabilidad-2.1.custom.gc'), 'code', 'name'))
 TipoAmbiente = CodeList(path_for_codelist('TipoAmbiente-2.1.gc'), 'code', 'name')
-TipoDocumento = CodeList(path_for_codelist('TipoDocumento-2.1.gc'), 'code', 'name')
+TipoDocumento = CodeList(path_for_codelist('TipoDocumento-2.1.gc'), 'code', 'name')\
+    .update(CodeList(path_for_codelist('TipoDocumento-2.1.custom.gc'), 'code', 'name'))
 TipoImpuesto = CodeList(path_for_codelist('TipoImpuesto-2.1.gc'), 'code', 'name')\
     .update(CodeList(path_for_codelist('TipoImpuesto-2.1.custom.gc'), 'code', 'name'))
 CodigoPrecioReferencia = CodeList(path_for_codelist('CodigoPrecioReferencia-2.1.gc'), 'code', 'name')
@@ -90,6 +91,8 @@ TipoOperacionNC = CodeList(path_for_codelist('TipoOperacionNC-2.1.gc'), 'code', 
 TipoOperacionND = CodeList(path_for_codelist('TipoOperacionND-2.1 - copia.gc'), 'code', 'name')
 TipoOperacionF = CodeList(path_for_codelist('TipoOperacionF-2.1.gc'), 'code', 'name')\
     .update(CodeList(path_for_codelist('TipoOperacionF-2.1.custom.gc'), 'code', 'name'))
+TipoOperacionDS = CodeList(path_for_codelist('TipoOperacionDS-2.1.gc'), 'code', 'name')
+TipoOperacionNCDS = CodeList(path_for_codelist('TipoOperacionNCDS-2.1.gc'), 'code', 'name')
 Municipio = CodeList(path_for_codelist('Municipio-2.1.gc'), 'code', 'name')
 Departamento = CodeList(path_for_codelist('Departamentos-2.1.gc'), 'code', 'name')
 Paises = CodeList(path_for_codelist('Paises-2.1.gc'), 'code', 'name')
