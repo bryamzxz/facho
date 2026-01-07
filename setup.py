@@ -13,24 +13,46 @@ with open('README.rst') as readme_file:
 with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
-requirements = ['Click>=6.0',
-                'chardet>=0.0',
-                'zeep==4.2.1',
-                'lxml==5.2.2',
-                'cryptography==42.0.8',
-                'pyOpenSSL==24.1.0',
-                'xmlsig==0.1.7',
-                'xades==0.2.4',
-                'xmlsec==1.3.14',
-                # usamos esta dependencia en runtime
-                # para forzar uso de policy_id de archivo local
-                'mock>=2.0.0',
-                'xmlschema>=1.8',
-                'python-dateutil==2.9.0.post0']
+# Dependencias minimas para la implementacion simplificada (sin zeep, xmlsig, xades)
+# Estas son suficientes para usar facho.fe.builders y facho.fe.signing
+requirements_minimal = [
+    'Click>=6.0',
+    'lxml>=5.0.0',
+    'cryptography>=42.0.0',
+    'requests>=2.28.0',
+]
+
+# Dependencias completas (compatibilidad con codigo existente)
+requirements_legacy = [
+    'chardet>=0.0',
+    'zeep==4.2.1',
+    'pyOpenSSL==24.1.0',
+    'xmlsig==0.1.7',
+    'xades==0.2.4',
+    'xmlsec==1.3.14',
+    # usamos esta dependencia en runtime
+    # para forzar uso de policy_id de archivo local
+    'mock>=2.0.0',
+    'xmlschema>=1.8',
+    'python-dateutil==2.9.0.post0',
+]
+
+# Por defecto, instalar todas las dependencias para compatibilidad
+requirements = requirements_minimal + requirements_legacy
 
 setup_requirements = ['pytest-runner', ]
 
 test_requirements = ['pytest', ]
+
+# Extras para instalacion selectiva
+extras_require = {
+    # Solo dependencias minimas (nueva implementacion simplificada)
+    'minimal': [],  # Ya incluidas en requirements_minimal
+    # Dependencias para codigo legacy (zeep, xmlsig, xades)
+    'legacy': requirements_legacy,
+    # Desarrollo
+    'dev': ['pytest', 'pytest-cov', 'black', 'flake8'],
+}
 
 setup(
     author="Jovany Leandro G.C",
@@ -53,6 +75,7 @@ setup(
         ],
     },
     install_requires=requirements,
+    extras_require=extras_require,
     license="GNU General Public License v3",
     long_description=readme + '\n\n' + history,
     long_description_content_type='text/x-rst',
@@ -68,6 +91,6 @@ setup(
     test_suite='tests',
     tests_require=test_requirements,
     url='https://github.com/bit4bit/facho',
-    version='0.2.0',
+    version='0.3.0',
     zip_safe=False,
 )
