@@ -14,3 +14,7 @@ from .fe import AMBIENTE_PRUEBAS
 from .fe import AMBIENTE_PRODUCCION
 from . import form_xml
 from . import nomina
+
+# Nuevos modulos simplificados (implementacion funcional DIAN)
+from . import signing
+from . import builders
