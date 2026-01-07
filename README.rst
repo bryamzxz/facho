@@ -240,18 +240,41 @@ Codigos de Impuestos
 +--------+-------+-------------------------------------------+
 | 26     | Sordicom | Aporte Significativo                   |
 +--------+-------+-------------------------------------------+
-| 32     | INPP  | Impuesto Nacional Productos Plasticos     |
+| 32     | ICL   | Impuesto al Consumo de Licores            |
 +--------+-------+-------------------------------------------+
-| 33     | IBUA  | Impuesto Bebidas Ultraprocesadas          |
+| 33     | INPP  | Impuesto Nacional Productos Plasticos     |
 +--------+-------+-------------------------------------------+
-| 34     | ICUI  | Impuesto Comestibles Ultraprocesados      |
+| 34     | IBUA  | Impuesto Bebidas Ultraprocesadas          |
 +--------+-------+-------------------------------------------+
-| 35     | ICL   | Impuesto al Consumo de Licores            |
+| 35     | ICUI  | Impuesto Comestibles Ultraprocesados      |
 +--------+-------+-------------------------------------------+
 | 36     | ADV   | Ad Valorem                                |
 +--------+-------+-------------------------------------------+
 | ZZ     | Otros | Nombre del Tributo segun Anexo           |
 +--------+-------+-------------------------------------------+
+
+Conceptos de Nota Credito
+=========================
+
+Segun Anexo Tecnico v1.9 (codigo 5 "Otros" fue eliminado):
+
++--------+-------------------------------------------------------+
+| Codigo | Descripcion                                           |
++========+=======================================================+
+| 1      | Devolucion de parte de los bienes; no aceptacion      |
++--------+-------------------------------------------------------+
+| 2      | Anulacion de factura electronica                      |
++--------+-------------------------------------------------------+
+| 3      | Rebaja o descuento parcial o total                    |
++--------+-------------------------------------------------------+
+| 4      | Ajuste de precio                                      |
++--------+-------------------------------------------------------+
+| 6      | Descuento comercial por pronto pago                   |
++--------+-------------------------------------------------------+
+| 7      | Descuento comercial por volumen de ventas             |
++--------+-------------------------------------------------------+
+
+**Nota:** El codigo 5 "Otros" fue eliminado en el Anexo Tecnico v1.9.
 
 Tests
 =====

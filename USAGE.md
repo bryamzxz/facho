@@ -298,7 +298,10 @@ xml = form_xml.DIANCreditNoteXML(credit_note)
 | 2 | Anulacion de factura electronica |
 | 3 | Rebaja o descuento parcial o total |
 | 4 | Ajuste de precio |
-| 6 | Otros |
+| 6 | Descuento comercial por pronto pago |
+| 7 | Descuento comercial por volumen de ventas |
+
+**Nota:** El codigo 5 "Otros" fue eliminado en el Anexo Tecnico v1.9.
 
 ## Notas Debito
 
