@@ -735,3 +735,110 @@ class DebitNote(Invoice):
         if not self.invoice_ident_prefix:
             self.invoice_ident_prefix = self.invoice_ident[0:6]
 
+
+@dataclass
+class PostalZone:
+    """Zona postal para direcciones"""
+    code: str
+
+
+@dataclass
+class WithholdingTaxSubTotal:
+    """Subtotal de impuesto de retención"""
+    percent: float
+    scheme: typing.Optional[TaxScheme] = None
+    tax_amount: Amount = Amount(0.0)
+    taxable_amount: Amount = Amount(0.0)
+
+    def calculate(self, base_amount: Amount):
+        if self.percent is not None:
+            self.taxable_amount = base_amount
+            self.tax_amount = base_amount * Amount(self.percent / 100)
+
+
+@dataclass
+class WithholdingTaxTotal:
+    """Total de impuestos de retención (Retenciones)"""
+    subtotals: typing.List[WithholdingTaxSubTotal]
+    tax_amount: Amount = Amount(0.0)
+
+    def calculate(self, base_amount: Amount):
+        for subtax in self.subtotals:
+            subtax.calculate(base_amount)
+            self.tax_amount += subtax.tax_amount
+
+
+@dataclass
+class BillingResponse:
+    """Respuesta de facturación de la DIAN"""
+    response_code: str
+    description: str
+
+
+class SupportDocumentType(str):
+    """Tipo de documento soporte"""
+    def __str__(self):
+        return '05'
+
+
+class SupportDocumentCreditNoteType(str):
+    """Tipo de nota crédito de documento soporte"""
+    def __str__(self):
+        return '95'
+
+
+class SupportDocument(Invoice):
+    """Documento Soporte en adquisiciones efectuadas a sujetos no obligados a expedir factura"""
+
+    def __init__(self):
+        super().__init__(SupportDocumentType())
+        self.invoice_withholding_tax_total = []
+
+    def _get_codelist_tipo_operacion(self):
+        return codelist.TipoOperacionDS
+
+    def add_withholding_tax_total(self, withholding: WithholdingTaxTotal):
+        self.invoice_withholding_tax_total.append(withholding)
+
+    def _calculate_withholding_taxes(self):
+        for withholding in self.invoice_withholding_tax_total:
+            withholding.calculate(self.invoice_legal_monetary_total.line_extension_amount)
+
+    def calculate(self):
+        super().calculate()
+        self._calculate_withholding_taxes()
+
+
+class SupportDocumentCreditNote(Invoice):
+    """Nota Crédito del Documento Soporte"""
+
+    def __init__(self, document_reference: BillingReference):
+        super().__init__(SupportDocumentCreditNoteType())
+
+        if not isinstance(document_reference, BillingReference):
+            raise TypeError('document_reference invalid type')
+        self.invoice_billing_reference = document_reference
+        self.invoice_withholding_tax_total = []
+
+    def _get_codelist_tipo_operacion(self):
+        return codelist.TipoOperacionNCDS
+
+    def _check_ident_prefix(self, prefix):
+        if len(prefix) != 6:
+            raise ValueError('prefix must be 6 length')
+
+    def _set_ident_prefix_automatic(self):
+        if not self.invoice_ident_prefix:
+            self.invoice_ident_prefix = self.invoice_ident[0:6]
+
+    def add_withholding_tax_total(self, withholding: WithholdingTaxTotal):
+        self.invoice_withholding_tax_total.append(withholding)
+
+    def _calculate_withholding_taxes(self):
+        for withholding in self.invoice_withholding_tax_total:
+            withholding.calculate(self.invoice_legal_monetary_total.line_extension_amount)
+
+    def calculate(self):
+        super().calculate()
+        self._calculate_withholding_taxes()
+

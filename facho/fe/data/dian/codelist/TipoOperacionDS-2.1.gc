@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gc:CodeList xmlns:gc="http://docs.oasis-open.org/codelist/ns/genericode/1.0/">
+   <Identification>
+      <ShortName>TipoOperacionDS</ShortName>
+      <LongName xml:lang="es">Tipo de operación del Documento Soporte</LongName>
+      <Version>1</Version>
+      <CanonicalUri>urn:dian:names:especificacion:ubl:listacodigos:gc:TipoOperacionDS</CanonicalUri>
+      <CanonicalVersionUri>urn:dian:names:especificacion:ubl:listacodigos:gc:TipoOperacionDS-2.1</CanonicalVersionUri>
+      <LocationUri>http://dian.gov.co/ubl/os-ubl-2.0/cl/gc/default/TipoOperacionDS-2.1.gc</LocationUri>
+      <Agency>
+         <LongName xml:lang="es">DIAN (Dirección de Impuestos y Aduanas Nacionales)</LongName>
+         <Identifier>195</Identifier>
+      </Agency>
+   </Identification>
+   <ColumnSet>
+      <Column Id="code" Use="required">
+         <ShortName>Code</ShortName>
+         <Data Type="normalizedString"/>
+      </Column>
+      <Column Id="name" Use="required">
+         <ShortName>Nombre</ShortName>
+         <Data Type="normalizedString"/>
+      </Column>
+      <Key Id="codeKey">
+         <ShortName>CodeKey</ShortName>
+         <ColumnRef Ref="code"/>
+      </Key>
+   </ColumnSet>
+   <SimpleCodeList>
+      <Row>
+         <Value ColumnRef="code">
+            <SimpleValue>10</SimpleValue>
+         </Value>
+         <Value ColumnRef="name">
+            <SimpleValue>Documento soporte estándar</SimpleValue>
+         </Value>
+      </Row>
+      <Row>
+         <Value ColumnRef="code">
+            <SimpleValue>11</SimpleValue>
+         </Value>
+         <Value ColumnRef="name">
+            <SimpleValue>Documento soporte de pago de nómina</SimpleValue>
+         </Value>
+      </Row>
+   </SimpleCodeList>
+</gc:CodeList>

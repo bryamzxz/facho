@@ -5,8 +5,8 @@ from ..facho import FachoXML, FachoXMLExtension, LXMLBuilder
 import uuid
 import xmlsig
 import xades
-from datetime import datetime
-import OpenSSL
+from datetime import datetime, timezone, timedelta
+from cryptography.hazmat.primitives.serialization import pkcs12
 import zipfile
 import warnings
 import hashlib
@@ -15,6 +15,9 @@ from .data.dian import codelist
 from . import form
 from collections import defaultdict
 from pathlib import Path
+
+# Timezone para Colombia (UTC-5)
+COL_TZ = timezone(timedelta(hours=-5))
 
 AMBIENTE_PRUEBAS = codelist.TipoAmbiente.by_name('Pruebas')['code']
 AMBIENTE_PRODUCCION = codelist.TipoAmbiente.by_name('Producción')['code']
@@ -245,6 +248,47 @@ class DianXMLExtensionCUDE(DianXMLExtensionCUDFE):
             '%d' % build_vars['TipoAmb'],
         ]
 
+
+class DianXMLExtensionCUDS(DianXMLExtensionCUDFE):
+    """Extensión para generar CUDS (Código Único de Documento Soporte)"""
+
+    def __init__(self, document, software_pin, tipo_ambiente=AMBIENTE_PRUEBAS):
+        self.tipo_ambiente = tipo_ambiente
+        self.software_pin = software_pin
+        self.invoice = document
+
+    def schemeName(self):
+        return 'CUDS-SHA384'
+
+    def buildVars(self):
+        build_vars = super().buildVars()
+        build_vars['Software-PIN'] = str(self.software_pin)
+        return build_vars
+
+    def formatVars(self):
+        build_vars = self.buildVars()
+        CodImpuesto1 = build_vars['CodImpuesto1']
+        CodImpuesto2 = build_vars['CodImpuesto2']
+        CodImpuesto3 = build_vars['CodImpuesto3']
+        return [
+            '%s' % build_vars['NumFac'],
+            '%s' % build_vars['FecFac'],
+            '%s' % build_vars['HoraFac'],
+            form.Amount(build_vars['ValorBruto']).truncate_as_string(2),
+            CodImpuesto1,
+            form.Amount(build_vars['ValorImpuestoPara'].get(CodImpuesto1, 0.0)).truncate_as_string(2),
+            CodImpuesto2,
+            form.Amount(build_vars['ValorImpuestoPara'].get(CodImpuesto2, 0.0)).truncate_as_string(2),
+            CodImpuesto3,
+            form.Amount(build_vars['ValorImpuestoPara'].get(CodImpuesto3, 0.0)).truncate_as_string(2),
+            form.Amount(build_vars['ValorTotalPagar']).truncate_as_string(2),
+            '%s' % build_vars['NitOFE'],
+            '%s' % build_vars['NumAdq'],
+            '%s' % build_vars['Software-PIN'],
+            '%d' % build_vars['TipoAmb'],
+        ]
+
+
 class DianXMLExtensionSoftwareProvider(FachoXMLExtension):
     # RESOLUCION 0004: pagina 108
 
@@ -295,24 +339,32 @@ class DianXMLExtensionSigner:
     @classmethod
     def from_bytes(cls, data, passphrase=None, localpolicy=True):
         self = cls.__new__(cls)
-        
+
         self._pkcs12_data = data
         self._passphrase = None
         self._localpolicy = localpolicy
         if passphrase:
             self._passphrase = passphrase.encode('utf-8')
-            
+
         return self
 
     def _element_extension_content(self, fachoxml):
         return fachoxml.builder.xpath(fachoxml.root, './ext:UBLExtensions/ext:UBLExtension[2]/ext:ExtensionContent')
 
+    def _load_pkcs12(self):
+        """Carga el certificado PKCS12 usando la librería cryptography"""
+        private_key, certificate, additional_certs = pkcs12.load_key_and_certificates(
+            self._pkcs12_data,
+            self._passphrase
+        )
+        return private_key, certificate, additional_certs
+
     def sign_xml_string(self, document):
         xml = LXMLBuilder.from_string(document)
         signature = self.sign_xml_element(xml)
 
-        fachoxml = FachoXML(xml,nsmap=NAMESPACES)
-        #DIAN 1.7.-2020: FAB01
+        fachoxml = FachoXML(xml, nsmap=NAMESPACES)
+        # DIAN 1.7.-2020: FAB01
         extcontent = self._element_extension_content(fachoxml)
         fachoxml.append_element(extcontent, signature)
 
@@ -326,7 +378,6 @@ class DianXMLExtensionSigner:
             "xmlsig-%s" % (id_uuid),
         )
         xml.append(signature)
-
 
         ref = xmlsig.template.add_reference(
             signature, xmlsig.constants.TransformSha256, uri="", name="xmldsig-%s-ref0" % (id_uuid)
@@ -352,8 +403,9 @@ class DianXMLExtensionSigner:
         )
         xmlsig.template.add_transform(props_ref, xmlsig.constants.TransformInclC14N)
 
-        # TODO assert with http://www.sic.gov.co/hora-legal-colombiana
-        props = xades.template.create_signed_properties(qualifying, name=id_props, datetime=datetime.now())
+        # Usar hora con timezone de Colombia
+        now_col = datetime.now(COL_TZ)
+        props = xades.template.create_signed_properties(qualifying, name=id_props, datetime=now_col)
         xades.template.add_claimed_role(props, "supplier")
 
         policy = xades.policy.GenericPolicyId(
@@ -361,8 +413,10 @@ class DianXMLExtensionSigner:
             POLICY_NAME,
             xmlsig.constants.TransformSha256)
         ctx = xades.XAdESContext(policy)
-        ctx.load_pkcs12(OpenSSL.crypto.load_pkcs12(self._pkcs12_data,
-                                                   self._passphrase))
+
+        # Usar cryptography para cargar el certificado PKCS12
+        private_key, certificate, additional_certs = self._load_pkcs12()
+        ctx.load_pkcs12(xades.utils.OpenSSLCrypto(private_key, certificate, additional_certs))
 
         if self._localpolicy:
             with mock_xades_policy():
@@ -371,7 +425,7 @@ class DianXMLExtensionSigner:
         else:
             ctx.sign(signature)
             ctx.verify(signature)
-        #xmlsig take parent root
+        # xmlsig take parent root
         xml.remove(signature)
         return signature
 
@@ -491,16 +545,24 @@ class DianXMLExtensionSignerVerifier:
         if passphrase:
             self._passphrase = passphrase.encode('utf-8')
 
+    def _load_pkcs12(self, data):
+        """Carga el certificado PKCS12 usando la librería cryptography"""
+        private_key, certificate, additional_certs = pkcs12.load_key_and_certificates(
+            data,
+            self._passphrase
+        )
+        return private_key, certificate, additional_certs
+
     def verify_string(self, document):
         # Obtener FachoXML
         xml = LXMLBuilder.from_string(document)
-        fachoxml = FachoXML(xml,nsmap=NAMESPACES)
+        fachoxml = FachoXML(xml, nsmap=NAMESPACES)
 
         # Obtener Signature
         signature = fachoxml.builder.xpath(fachoxml.root, '//ds:Signature')
         assert signature is not None
 
-        # Se mueve Signature a elemento raiz para realizar verificaion
+        # Se mueve Signature a elemento raiz para realizar verificacion
         signature.getparent().remove(signature)
         fachoxml.root.append(signature)
 
@@ -508,9 +570,11 @@ class DianXMLExtensionSignerVerifier:
         pkcs12_data = self._pkcs12_path_or_bytes
         if isinstance(self._pkcs12_path_or_bytes, str):
             pkcs12_data = open(self._pkcs12_path_or_bytes, 'rb').read()
+
         ctx = xades.XAdESContext()
-        ctx.load_pkcs12(OpenSSL.crypto.load_pkcs12(pkcs12_data,
-                                                   self._passphrase))
+        private_key, certificate, additional_certs = self._load_pkcs12(pkcs12_data)
+        ctx.load_pkcs12(xades.utils.OpenSSLCrypto(private_key, certificate, additional_certs))
+
         try:
             if self._localpolicy:
                 with mock_xades_policy():
@@ -518,5 +582,5 @@ class DianXMLExtensionSignerVerifier:
             else:
                 ctx.verify(signature)
             return True
-        except:
+        except Exception:
             return False
