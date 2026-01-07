@@ -64,18 +64,10 @@
 		</Row>
 		<Row>
 			<Value ColumnRef="code">
-				<SimpleValue>5</SimpleValue>
-			</Value>
-			<Value ColumnRef="name">
-				<SimpleValue>Otros</SimpleValue>
-			</Value>
-		</Row>
-		<Row>
-			<Value ColumnRef="code">
 				<SimpleValue>6</SimpleValue>
 			</Value>
 			<Value ColumnRef="name">
-				<SimpleValue>Descuento por pronto pago</SimpleValue>
+				<SimpleValue>Descuento comercial por pronto pago</SimpleValue>
 			</Value>
 		</Row>
 		<Row>
