@@ -64,10 +64,18 @@
 		</Row>
 		<Row>
 			<Value ColumnRef="code">
-				<SimpleValue>5</SimpleValue>
+				<SimpleValue>6</SimpleValue>
 			</Value>
 			<Value ColumnRef="name">
-				<SimpleValue>Otros</SimpleValue>
+				<SimpleValue>Descuento comercial por pronto pago</SimpleValue>
+			</Value>
+		</Row>
+		<Row>
+			<Value ColumnRef="code">
+				<SimpleValue>7</SimpleValue>
+			</Value>
+			<Value ColumnRef="name">
+				<SimpleValue>Descuento comercial por volumen de ventas</SimpleValue>
 			</Value>
 		</Row>
 	</SimpleCodeList>
