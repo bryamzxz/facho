@@ -38,27 +38,28 @@ Estructura del Proyecto
 
     facho/
     ├── __init__.py
-    ├── cli.py                    # Interfaz de linea de comandos
-    ├── facho.py                  # Core: FachoXML, LXMLBuilder
     └── fe/                       # Facturacion Electronica
-        ├── fe.py                 # Core FE: CUFE/CUDE, firmas, extensiones DIAN
-        ├── form/
-        │   ├── __init__.py       # Modelos de datos: Invoice, Party, Amount, etc.
-        │   └── query.py          # Consultas
-        ├── form_xml/             # Generadores XML
-        │   ├── invoice.py        # DIANInvoiceXML
-        │   ├── credit_note.py    # Notas credito
-        │   ├── debit_note.py     # Notas debito
-        │   ├── support_document.py # Documentos soporte
-        │   └── utils.py          # Utilidades
+        ├── __init__.py
+        ├── builders/             # Constructores XML UBL 2.1
+        │   ├── invoice_builder.py    # InvoiceBuilder, Party, Address
+        │   ├── credit_note_builder.py # CreditNoteBuilder
+        │   ├── debit_note_builder.py  # DebitNoteBuilder
+        │   └── constants.py          # Constantes DIAN
         ├── client/               # Cliente DIAN
-        │   ├── dian.py           # DianClient, Habilitacion
-        │   └── wsse/
-        │       └── signature.py  # Firma WS-Security
-        ├── data/dian/            # Datos estaticos DIAN
-        │   ├── codelist/         # Listas de codigos (.gc)
-        │   └── XSD/              # Esquemas XSD
-        └── nomina/               # Nomina electronica
+        │   └── dian.py           # DianClient
+        ├── signing/              # Firma digital
+        │   └── xades.py          # XAdESSigner
+        └── data/dian/            # Datos estaticos DIAN
+            └── codelist/         # Listas de codigos (.gc)
+
+    dian_fe/                      # Paquete modular independiente
+    ├── __init__.py
+    ├── xml_builder.py            # InvoiceBuilder, CreditNoteBuilder, DebitNoteBuilder
+    ├── xades_signer.py           # XAdESSigner
+    ├── dian_client.py            # DianClient
+    ├── certificate.py            # Manejo de certificados
+    ├── utils.py                  # CUFE, CUDE, DV
+    └── config.py                 # Configuracion
 
 Instalacion
 ===========
@@ -80,95 +81,93 @@ Con dependencias de desarrollo::
 Uso Rapido
 ==========
 
-Ejemplo basico de generacion de factura:
+Ejemplo basico de generacion de factura usando el paquete modular ``dian_fe``:
 
 .. code-block:: python
 
-    import facho.fe.form as form
-    import facho.fe.form_xml as form_xml
-    from datetime import datetime
-
-    # Crear factura de venta nacional
-    inv = form.NationalSalesInvoice()
-
-    # Configurar periodo y emision
-    inv.set_period(datetime.now(), datetime.now())
-    inv.set_issue(datetime.now())
-    inv.set_ident('SETP990003033')
-    inv.set_operation_type('10')
-
-    # Configurar proveedor
-    inv.set_supplier(form.Party(
-        legal_name='MI EMPRESA SAS',
-        name='MI EMPRESA SAS',
-        ident=form.PartyIdentification('900123456', '7', '31'),
-        responsability_code=form.Responsability(['O-07', 'O-09']),
-        responsability_regime_code='48',
-        organization_code='1',
-        email='contacto@miempresa.com',
-        address=form.Address(
-            name='Direccion principal',
-            street='Calle 123 #45-67',
-            city=form.City('05001', 'Medellin'),
-            country=form.Country('CO', 'Colombia'),
-            countrysubentity=form.CountrySubentity('05', 'Antioquia')
-        )
-    ))
-
-    # Configurar cliente
-    inv.set_customer(form.Party(
-        legal_name='CLIENTE EJEMPLO',
-        name='CLIENTE EJEMPLO',
-        ident=form.PartyIdentification('1234567890', '', '13'),
-        responsability_code=form.Responsability(['R-99-PN']),
-        responsability_regime_code='49',
-        organization_code='2',
-        email='cliente@ejemplo.com',
-        address=form.Address(
-            name='',
-            street='Carrera 10 #20-30',
-            city=form.City('11001', 'Bogota'),
-            country=form.Country('CO', 'Colombia'),
-            countrysubentity=form.CountrySubentity('11', 'Bogota')
-        )
-    ))
-
-    # Configurar metodo de pago
-    inv.set_payment_mean(form.PaymentMean(
-        id='1',
-        code='10',
-        due_at=datetime.now(),
-        payment_id='1'
-    ))
-
-    # Agregar linea de factura
-    inv.add_invoice_line(form.InvoiceLine(
-        quantity=form.Quantity(1, '94'),
-        description='Producto de ejemplo',
-        item=form.StandardItem('PROD001', 'Producto de ejemplo'),
-        price=form.Price(
-            amount=form.Amount(100000.00),
-            type_code='01',
-            type='Precio unitario'
-        ),
-        tax=form.TaxTotal(
-            subtotals=[
-                form.TaxSubTotal(percent=19.00)
-            ]
-        )
-    ))
-
-    # Calcular totales
-    inv.calculate()
-
-    # Generar XML firmado
-    xml = form_xml.DIANInvoiceXML(inv)
-    form_xml.utils.DIANWriteSigned(
-        xml,
-        'factura.xml',
-        'ruta/certificado.p12',
-        'password'
+    from dian_fe import (
+        InvoiceBuilder, InvoiceConfig, Party, Address, InvoiceLine,
+        XAdESSigner, DianClient
     )
+
+    # Configuracion
+    config = InvoiceConfig(
+        software_id='xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+        software_pin='12345',
+        technical_key='clave_tecnica_dian',
+        nit='900123456',
+        company_name='MI EMPRESA SAS',
+        resolution_number='18760000001',
+        resolution_date='2024-01-01',
+        resolution_end_date='2026-12-31',
+        prefix='SETP',
+        range_from='990000001',
+        range_to='995000000',
+        environment='2'  # 1=Produccion, 2=Habilitacion
+    )
+
+    # Proveedor (emisor)
+    supplier = Party(
+        nit='900123456',
+        dv='7',
+        name='MI EMPRESA SAS',
+        tax_scheme='O-48',
+        address=Address(
+            street='Calle 123 #45-67',
+            city_code='05001',
+            city_name='Medellin',
+            department_code='05',
+            department_name='Antioquia',
+            country_code='CO'
+        )
+    )
+
+    # Cliente (adquiriente)
+    customer = Party(
+        nit='1234567890',
+        dv='',
+        name='CLIENTE EJEMPLO',
+        doc_type='13',  # Cedula
+        tax_scheme='O-49',
+        address=Address(
+            street='Carrera 10 #20-30',
+            city_code='11001',
+            city_name='Bogota',
+            department_code='11',
+            department_name='Bogota',
+            country_code='CO'
+        )
+    )
+
+    # Lineas de factura
+    lines = [
+        InvoiceLine(
+            quantity=1,
+            unit_code='94',
+            description='Producto de ejemplo',
+            price=100000.00,
+            tax_percent=19.0
+        )
+    ]
+
+    # Crear factura
+    builder = InvoiceBuilder(config)
+    xml = builder.build(
+        number='SETP990003033',
+        issue_date='2026-01-08',
+        issue_time='10:30:00-05:00',
+        supplier=supplier,
+        customer=customer,
+        lines=lines
+    )
+
+    # Firmar
+    signer = XAdESSigner.from_pkcs12('certificado.p12', 'password')
+    signed_xml = signer.sign(xml)
+
+    # Guardar
+    with open('factura_firmada.xml', 'wb') as f:
+        f.write(signed_xml)
 
 Linea de Comandos (CLI)
 =======================
@@ -310,11 +309,11 @@ Desarrollo con Docker
 Documentacion
 =============
 
-La documentacion completa esta disponible en el directorio ``docs/``:
+La documentacion completa esta disponible en:
 
-* **USAGE.rst** - Guia de uso detallada
+* **USAGE.md** - Guia de uso detallada
+* **dian_fe/README.md** - Documentacion del paquete modular
 * **docs/ANEXO_TECNICO_V19.md** - Cambios del Anexo Tecnico v1.9
-* **docs/API.md** - Referencia de la API
 * **examples/** - Ejemplos de uso
 
 Referencias DIAN
