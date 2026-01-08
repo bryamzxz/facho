@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from lxml import etree
 
-from .constants import NS, DIAN_PROFILE_ID_CREDIT_NOTE
+from .constants import NS, DIAN_PROFILE_ID_CREDIT_NOTE, CUSTOMIZATION_ID_CREDIT_NOTE
 from .invoice_builder import (
     InvoiceBuilder,
     InvoiceConfig,
@@ -117,11 +117,11 @@ class CreditNoteBuilder(InvoiceBuilder):
         # Elementos basicos
         self._add_basic_elements_cn(credit_note, credit_note_data, cude)
 
+        # DiscrepancyResponse ANTES de BillingReference (orden segun Anexo Tecnico DIAN)
+        self._add_discrepancy_response(credit_note, credit_note_data)
+
         # Referencia a factura
         self._add_billing_reference(credit_note, credit_note_data)
-
-        # Respuesta de discrepancia
-        self._add_discrepancy_response(credit_note, credit_note_data)
 
         # Proveedor
         self._add_supplier(credit_note, credit_note_data.supplier)
@@ -219,10 +219,11 @@ class CreditNoteBuilder(InvoiceBuilder):
         cude: str
     ):
         """Agregar elementos basicos de nota credito."""
-        from .constants import DIAN_UBL_VERSION, DIAN_CUSTOMIZATION_ID
+        from .constants import DIAN_UBL_VERSION
 
         etree.SubElement(credit_note, '{%s}UBLVersionID' % NS['cbc']).text = DIAN_UBL_VERSION
-        etree.SubElement(credit_note, '{%s}CustomizationID' % NS['cbc']).text = DIAN_CUSTOMIZATION_ID
+        # CustomizationID para notas credito es 20
+        etree.SubElement(credit_note, '{%s}CustomizationID' % NS['cbc']).text = CUSTOMIZATION_ID_CREDIT_NOTE
         etree.SubElement(credit_note, '{%s}ProfileID' % NS['cbc']).text = DIAN_PROFILE_ID_CREDIT_NOTE
         etree.SubElement(
             credit_note, '{%s}ProfileExecutionID' % NS['cbc']

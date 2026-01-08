@@ -547,3 +547,156 @@ class TestConstants:
         assert '2' in DEBIT_REASONS
         assert '3' in DEBIT_REASONS
         assert '4' in DEBIT_REASONS
+
+    def test_customization_ids(self):
+        """Test CustomizationID por tipo de documento."""
+        assert DOC_TYPES['factura']['customization_id'] == '10'
+        assert DOC_TYPES['credito']['customization_id'] == '20'
+        assert DOC_TYPES['debito']['customization_id'] == '30'
+
+    def test_uuid_names(self):
+        """Test nombres de UUID por tipo de documento."""
+        assert DOC_TYPES['factura']['uuid_name'] == 'CUFE-SHA384'
+        assert DOC_TYPES['credito']['uuid_name'] == 'CUDE-SHA384'
+        assert DOC_TYPES['debito']['uuid_name'] == 'CUDE-SHA384'
+
+
+# =============================================================================
+# TESTS DE CUSTOMIZATION ID EN XML
+# =============================================================================
+
+class TestCustomizationIDInXML:
+    """Tests para verificar CustomizationID correcto en XML generado."""
+
+    def test_invoice_customization_id(self, sample_config, sample_invoice_data):
+        """Test que factura tenga CustomizationID=10."""
+        builder = InvoiceBuilder(sample_config)
+        xml = builder.build(sample_invoice_data)
+
+        cust_id = xml.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}CustomizationID')
+        assert cust_id is not None
+        assert cust_id.text == '10'
+
+    def test_credit_note_customization_id(self, sample_config, sample_supplier, sample_customer, sample_lines):
+        """Test que nota credito tenga CustomizationID=20."""
+        credit_note_data = CreditNoteData(
+            number='SETP990000002',
+            issue_date='2024-01-16',
+            issue_time='11:00:00-05:00',
+            note='Nota credito',
+            supplier=sample_supplier,
+            customer=sample_customer,
+            lines=sample_lines,
+            billing_reference_id='SETP990000001',
+            billing_reference_uuid='a' * 96,
+            billing_reference_date='2024-01-15',
+        )
+
+        builder = CreditNoteBuilder(sample_config)
+        xml = builder.build(credit_note_data)
+
+        cust_id = xml.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}CustomizationID')
+        assert cust_id is not None
+        assert cust_id.text == '20'
+
+    def test_debit_note_customization_id(self, sample_config, sample_supplier, sample_customer, sample_lines):
+        """Test que nota debito tenga CustomizationID=30."""
+        debit_note_data = DebitNoteData(
+            number='SETP990000003',
+            issue_date='2024-01-17',
+            issue_time='09:00:00-05:00',
+            note='Nota debito',
+            supplier=sample_supplier,
+            customer=sample_customer,
+            lines=sample_lines,
+            billing_reference_id='SETP990000001',
+            billing_reference_uuid='a' * 96,
+            billing_reference_date='2024-01-15',
+        )
+
+        builder = DebitNoteBuilder(sample_config)
+        xml = builder.build(debit_note_data)
+
+        cust_id = xml.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}CustomizationID')
+        assert cust_id is not None
+        assert cust_id.text == '30'
+
+
+# =============================================================================
+# TESTS DE ORDEN DE ELEMENTOS EN NOTAS
+# =============================================================================
+
+class TestElementOrder:
+    """Tests para verificar orden correcto de elementos en notas."""
+
+    def test_discrepancy_before_billing_reference_credit_note(
+        self, sample_config, sample_supplier, sample_customer, sample_lines
+    ):
+        """Test que DiscrepancyResponse venga ANTES de BillingReference en nota credito."""
+        credit_note_data = CreditNoteData(
+            number='SETP990000002',
+            issue_date='2024-01-16',
+            issue_time='11:00:00-05:00',
+            note='Nota credito',
+            supplier=sample_supplier,
+            customer=sample_customer,
+            lines=sample_lines,
+            billing_reference_id='SETP990000001',
+            billing_reference_uuid='a' * 96,
+            billing_reference_date='2024-01-15',
+        )
+
+        builder = CreditNoteBuilder(sample_config)
+        xml = builder.build(credit_note_data)
+
+        # Obtener indices de los elementos
+        children = list(xml)
+        discrepancy_idx = None
+        billing_idx = None
+
+        for idx, child in enumerate(children):
+            if 'DiscrepancyResponse' in child.tag:
+                discrepancy_idx = idx
+            if 'BillingReference' in child.tag:
+                billing_idx = idx
+
+        assert discrepancy_idx is not None, "DiscrepancyResponse no encontrado"
+        assert billing_idx is not None, "BillingReference no encontrado"
+        assert discrepancy_idx < billing_idx, \
+            f"DiscrepancyResponse (idx={discrepancy_idx}) debe estar ANTES de BillingReference (idx={billing_idx})"
+
+    def test_discrepancy_before_billing_reference_debit_note(
+        self, sample_config, sample_supplier, sample_customer, sample_lines
+    ):
+        """Test que DiscrepancyResponse venga ANTES de BillingReference en nota debito."""
+        debit_note_data = DebitNoteData(
+            number='SETP990000003',
+            issue_date='2024-01-17',
+            issue_time='09:00:00-05:00',
+            note='Nota debito',
+            supplier=sample_supplier,
+            customer=sample_customer,
+            lines=sample_lines,
+            billing_reference_id='SETP990000001',
+            billing_reference_uuid='a' * 96,
+            billing_reference_date='2024-01-15',
+        )
+
+        builder = DebitNoteBuilder(sample_config)
+        xml = builder.build(debit_note_data)
+
+        # Obtener indices de los elementos
+        children = list(xml)
+        discrepancy_idx = None
+        billing_idx = None
+
+        for idx, child in enumerate(children):
+            if 'DiscrepancyResponse' in child.tag:
+                discrepancy_idx = idx
+            if 'BillingReference' in child.tag:
+                billing_idx = idx
+
+        assert discrepancy_idx is not None, "DiscrepancyResponse no encontrado"
+        assert billing_idx is not None, "BillingReference no encontrado"
+        assert discrepancy_idx < billing_idx, \
+            f"DiscrepancyResponse (idx={discrepancy_idx}) debe estar ANTES de BillingReference (idx={billing_idx})"
