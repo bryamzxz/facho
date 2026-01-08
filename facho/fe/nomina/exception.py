@@ -1,2 +1,0 @@
-class DIANNominaIndividualError(Exception):
-    pass

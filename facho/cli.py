@@ -1,406 +1,143 @@
 # -*- coding: utf-8 -*-
-import sys
-import base64
-import warnings
+# This file is part of facho.
+"""
+CLI para facturacion electronica DIAN Colombia.
+Usa los modulos simplificados sin dependencias legacy.
+"""
 
+import sys
 import click
 
-import logging.config
-
-logging.config.dictConfig({
-    'version': 1,
-    'formatters': {
-        'verbose': {
-            'format': '%(name)s: %(message)s'
-        }
-    },
-    'handlers': {
-        'console': {
-            'level': 'DEBUG',
-            'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
-        },
-    },
-    'loggers': {
-        'zeep.transports': {
-            'level': 'DEBUG',
-            'propagate': True,
-            'handlers': ['console'],
-        },
-    }
-})
-
-def disable_ssl():
-    # MACHETE
-    import ssl
-    if getattr(ssl, '_create_unverified_context', None):
-        ssl._create_default_https_context = ssl._create_unverified_context
-        warnings.warn("be sure!! ssl disable")
-    else:
-        warnings.warn("can't disable ssl")
-
 
 @click.command()
-@click.option('--nit', required=True)
-@click.option('--nit-proveedor', required=True)
-@click.option('--id-software', required=True)
-@click.option('--username', required=True)
-@click.option('--password', required=True)
-def consultaResolucionesFacturacion(nit, nit_proveedor, id_software, username, password):
-    from facho.fe.client import dian
-    client_dian = dian.DianClient(username,
-                                  password)
-    resp = client_dian.request(dian.ConsultaResolucionesFacturacionPeticion(
-        nit, nit_proveedor, id_software
-    ))
-    print(str(resp))
+@click.option('--cert', required=True, type=click.Path(exists=True), help='Certificado .pfx')
+@click.option('--password', required=True, help='Password del certificado')
+@click.option('--habilitacion/--produccion', default=True, help='Ambiente')
+@click.option('--track-id', required=True, help='ZipKey o TrackId')
+def get_status_zip(cert, password, habilitacion, track_id):
+    """Consultar estado de documento por ZipKey."""
+    from facho.fe.client import DianSimpleClient
 
-
-@click.command()
-@click.option('--private-key', required=True)
-@click.option('--public-key', required=True)
-@click.option('--habilitacion/--produccion', default=False)
-@click.option('--password')
-@click.option('--test-setid', required=True)
-@click.argument('filename', required=True)
-@click.argument('zipfile', type=click.Path(exists=True))
-def soap_send_test_set_async(private_key, public_key, habilitacion, password, test_setid, filename, zipfile):
-    from facho.fe.client import dian
-
-    client = dian.DianSignatureClient(private_key, public_key, password=password)
-    req = dian.SendTestSetAsync
-    if habilitacion:
-        req = dian.Habilitacion.SendTestSetAsync
-    resp = client.request(req(
-        filename,
-        open(zipfile, 'rb').read(),
-        test_setid,
-    ))
-    print(resp)
-
-@click.command()
-@click.option('--private-key', required=True)
-@click.option('--public-key', required=True)
-@click.option('--habilitacion/--produccion', default=False)
-@click.option('--password')
-@click.argument('filename', required=True)
-@click.argument('zipfile', type=click.Path(exists=True))
-def soap_send_bill_async(private_key, public_key, habilitacion, password, filename, zipfile):
-    from facho.fe.client import dian
-
-    client = dian.DianSignatureClient(private_key, public_key, password=password)
-    req = dian.SendBillAsync
-    if habilitacion:
-        req = dian.Habilitacion.SendBillAsync
-    resp = client.request(req(
-        filename,
-        open(zipfile, 'rb').read()
-    ))
-    print(resp)
-
-@click.command()
-@click.option('--private-key', required=True)
-@click.option('--public-key', required=True)
-@click.option('--habilitacion/--produccion', default=False)
-@click.option('--password')
-@click.argument('filename', required=True)
-@click.argument('zipfile', type=click.Path(exists=True))
-def soap_send_bill_sync(private_key, public_key, habilitacion, password, filename, zipfile):
-    from facho.fe.client import dian
-
-    client = dian.DianSignatureClient(private_key, public_key, password=password)
-    req = dian.SendBillSync
-    if habilitacion:
-        req = dian.Habilitacion.SendBillSync
-    resp = client.request(req(
-        filename,
-        open(zipfile, 'rb').read()
-    ))
-    print(resp)
-
-@click.command()
-@click.option('--private-key', required=True)
-@click.option('--public-key', required=True)
-@click.option('--habilitacion/--produccion', default=False)
-@click.option('--password')
-@click.option('--track-id', required=True)
-def soap_get_status_zip(private_key, public_key, habilitacion, password, track_id):
-    from facho.fe.client import dian
-
-    client = dian.DianSignatureClient(private_key, public_key, password=password)
-    req = dian.GetStatusZip
-    if habilitacion:
-        req = dian.Habilitacion.GetStatusZip
-    resp = client.request(req(
-        trackId = track_id
-    ))
-
-    print("StatusCode:", resp.StatusCode)
-    print("StatusDescription:", resp.StatusDescription)
-    print("===ERRORES NOTIFICADOS====")
-    for error_msg in resp.ErrorMessage:
-        print("*", error_msg)
-
-
-@click.command()
-@click.option('--private-key', required=True)
-@click.option('--public-key', required=True)
-@click.option('--habilitacion/--produccion', default=False)
-@click.option('--password')
-@click.option('--track-id', required=True)
-def soap_get_status(private_key, public_key, habilitacion, password, track_id):
-    from facho.fe.client import dian
-
-    client = dian.DianSignatureClient(private_key, public_key, password=password)
-    req = dian.GetStatus
-    if habilitacion:
-        req = dian.Habilitacion.GetStatus
-    resp = client.request(req(
-        trackId = track_id
-    ))
-    print(resp)
-
-@click.command()
-@click.option('--private-key', required=True)
-@click.option('--public-key', required=True)
-@click.option('--habilitacion/--produccion', default=False)
-@click.option('--password')
-@click.option('--nit', required=True)
-@click.option('--nit-proveedor', required=True)
-@click.option('--id-software', required=True)
-def soap_get_numbering_range(private_key,
-                             public_key,
-                             habilitacion,
-                             password,
-                             nit, nit_proveedor, id_software):
-    from facho.fe.client import dian
-
-    client = dian.DianSignatureClient(private_key, public_key, password=password)
-    req = dian.GetNumberingRange
-    if habilitacion:
-        req = dian.Habilitacion.GetNumberingRange
-    resp = client.request(req(
-        nit, nit_proveedor, id_software
-    ))
-    print(resp)
-
-@click.command()
-@click.argument('invoice_path')
-def validate_invoice(invoice_path):
-    warnings.warn("!! NO APROBADO FUNCIONAMIENTO")
-
-    from facho.fe.data.dian import XSD
-    content = open(invoice_path, 'r').read()
-    # TODO donde ubicar esta responsabilidad?
-    # esto es requerido por el XSD de la DIAN
-    content = content.replace(
-        'xmlns:fe="http://www.dian.gov.co/contratos/facturaelectronica/v1"',
-        'xmlns:fe="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"'
+    environment = 'habilitacion' if habilitacion else 'produccion'
+    client = DianSimpleClient(
+        certificate_path=cert,
+        certificate_password=password,
+        environment=environment
     )
-    XSD.validate(content, XSD.UBLInvoice)
+
+    resp = client.get_status_zip(track_id)
+
+    click.echo(f"ZipKey: {track_id}")
+    click.echo(f"IsValid: {resp.is_valid}")
+    click.echo(f"StatusCode: {resp.status_code}")
+    click.echo(f"StatusDescription: {resp.status_description}")
+
+    if resp.error_messages:
+        click.echo("=== ERRORES ===")
+        for msg in resp.error_messages:
+            click.echo(f"  * {msg}")
 
 
 @click.command()
-@click.argument('nomina_path')
-def validate_nominaindividual(nomina_path):
-    from facho.fe.data.dian import XSD
-    content = open(nomina_path, 'r').read()
-    content = content.replace(
-        'xmlns="http://www.dian.gov.co/contratos/facturaelectronica/v1"',
-        'xmlns="dian:gov:co:facturaelectronica:NominaIndividual"',
+@click.option('--cert', required=True, type=click.Path(exists=True), help='Certificado .pfx')
+@click.option('--password', required=True, help='Password del certificado')
+@click.option('--habilitacion/--produccion', default=True, help='Ambiente')
+@click.option('--test-set-id', required=True, help='TestSetId DIAN')
+@click.argument('filename', required=True)
+@click.argument('zipfile', type=click.Path(exists=True))
+def send_test_set_async(cert, password, habilitacion, test_set_id, filename, zipfile):
+    """Enviar documento de prueba a DIAN."""
+    from facho.fe.client import DianSimpleClient
+
+    environment = 'habilitacion' if habilitacion else 'produccion'
+    client = DianSimpleClient(
+        certificate_path=cert,
+        certificate_password=password,
+        environment=environment
     )
-    XSD.validate(content, XSD.NominaIndividual)
+
+    with open(zipfile, 'rb') as f:
+        content = f.read()
+
+    resp = client.send_test_set_async(filename, content, test_set_id)
+
+    click.echo(f"ZipKey: {resp.zip_key}")
+    if resp.error_messages:
+        click.echo("=== ERRORES ===")
+        for msg in resp.error_messages:
+            click.echo(f"  * {msg}")
 
 
 @click.command()
-@click.option('--private-key', type=click.Path(exists=True))
-@click.option('--passphrase')
-@click.option('--ssl/--no-ssl', default=False)
-@click.option('--use-cache-policy/--no-use-cache-policy', default=False)
+@click.option('--cert', required=True, type=click.Path(exists=True), help='Certificado .pfx')
+@click.option('--password', required=True, help='Password del certificado')
+@click.option('--habilitacion/--produccion', default=True, help='Ambiente')
+@click.argument('filename', required=True)
+@click.argument('zipfile', type=click.Path(exists=True))
+def send_bill_sync(cert, password, habilitacion, filename, zipfile):
+    """Enviar documento sincronicamente a DIAN."""
+    from facho.fe.client import DianSimpleClient
+
+    environment = 'habilitacion' if habilitacion else 'produccion'
+    client = DianSimpleClient(
+        certificate_path=cert,
+        certificate_password=password,
+        environment=environment
+    )
+
+    with open(zipfile, 'rb') as f:
+        content = f.read()
+
+    resp = client.send_bill_sync(filename, content)
+
+    click.echo(f"IsValid: {resp.is_valid}")
+    click.echo(f"StatusCode: {resp.status_code}")
+    click.echo(f"StatusDescription: {resp.status_description}")
+
+    if resp.error_messages:
+        click.echo("=== ERRORES ===")
+        for msg in resp.error_messages:
+            click.echo(f"  * {msg}")
+
+
+@click.command()
+@click.option('--cert', required=True, type=click.Path(exists=True), help='Certificado .pfx')
+@click.option('--password', required=True, help='Password del certificado')
 @click.argument('xmlfile', type=click.Path(exists=True), required=True)
 @click.argument('output', required=True)
-def sign_xml(private_key, passphrase, xmlfile, ssl=True, use_cache_policy=False, output=None):
-    if not ssl:
-        disable_ssl()
+def sign_xml(cert, password, xmlfile, output):
+    """Firmar documento XML con XAdES-EPES."""
+    from facho.fe.signing import XAdESSigner
+    from lxml import etree
 
-    from facho import fe
-    if use_cache_policy:
-        warnings.warn("xades using cache policy")
+    signer = XAdESSigner.from_pkcs12(cert, password)
 
-    signer = fe.DianXMLExtensionSigner(private_key, passphrase=passphrase, localpolicy=use_cache_policy)
-    document = open(xmlfile, 'r').read().encode('utf-8')
-    with open(output, 'w') as f:
-        f.write(signer.sign_xml_string(document))
+    with open(xmlfile, 'rb') as f:
+        xml_content = f.read()
 
-@click.command()
-@click.option('--private-key', type=click.Path(exists=True))
-@click.option('--generate/--validate', default=False)
-@click.option('--passphrase')
-@click.option('--ssl/--no-ssl', default=False)
-@click.option('--sign/--no-sign', default=False)
-@click.option('--use-cache-policy/--no-use-cache-policy', default=False)
-@click.argument('scriptname', type=click.Path(exists=True), required=True)
-@click.argument('output', required=True)
-def generate_invoice(private_key, passphrase, scriptname, generate=False, ssl=True, sign=False, use_cache_policy=False, output=None):
-    """
-    imprime xml en pantalla.
-    SCRIPTNAME espera
-     def invoice() -> form.Invoice
-     def extensions(form.Invoice): -> List[facho.FachoXMLExtension]
-    """
+    xml = etree.fromstring(xml_content)
+    signed_xml = signer.sign(xml)
 
-    if not ssl:
-        disable_ssl()
+    with open(output, 'wb') as f:
+        f.write(etree.tostring(signed_xml, encoding='UTF-8', xml_declaration=True))
 
-    import importlib.util
+    click.echo(f"Documento firmado guardado en: {output}")
 
-    spec = importlib.util.spec_from_file_location('invoice', scriptname)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    import facho.fe.form as form
-    from facho.fe.form_xml import DIANInvoiceXML, DIANWriteSigned,DIANWrite
-    from facho import fe
-
-    try:
-        invoice_xml = module.document_xml()
-    except AttributeError:
-        invoice_xml = DIANInvoiceXML
-
-    print("Using document xml:", invoice_xml)
-    invoice = module.invoice()
-    invoice.calculate()
-
-    if generate:
-        xml = invoice_xml(invoice)
-
-        extensions = module.extensions(invoice)
-        for extension in extensions:
-            xml.add_extension(extension)
-
-        if sign:
-            DIANWriteSigned(xml, output, private_key, passphrase, use_cache_policy)
-        else:
-            DIANWrite(xml, output)
 
 @click.command()
-@click.option('--private-key', type=click.Path(exists=True))
-@click.option('--passphrase')
-@click.option('--ssl/--no-ssl', default=False)
-@click.option('--sign/--no-sign', default=False)
-@click.option('--use-cache-policy/--no-use-cache-policy', default=False)
-@click.argument('scriptname', type=click.Path(exists=True), required=True)
-@click.argument('output', required=True)
-def generate_nomina(private_key, passphrase, scriptname, ssl=True, sign=False, use_cache_policy=False, output=None):
-    """
-    imprime xml en pantalla.
-    SCRIPTNAME espera
-     def nomina() -> fe.nomina.NominaIndividual
-     def extensions(fe.nomina.NominaIndividual): -> List[facho.FachoXMLExtension]
-    """
+def version():
+    """Mostrar version."""
+    click.echo("facho v0.1.0 - Facturacion Electronica DIAN Colombia")
 
-    if not ssl:
-        disable_ssl()
-
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location('nomina', scriptname)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    from facho.fe.form_xml import DIANWriteSigned, DIANWrite
-    import facho.fe
-
-    nomina = module.nomina()
-
-    xml = nomina.toFachoXML()
-
-    extensions = module.extensions(nomina)
-    for extension in extensions:
-        xml.add_extension(extension)
-
-    if sign:
-        DIANWriteSigned(xml, output, private_key, passphrase, use_cache_policy, dian_signer=facho.fe.nomina.DianXMLExtensionSigner)
-    else:
-        DIANWrite(xml, output)
-
-@click.command()
-@click.option('--private-key', required=True)
-@click.option('--public-key', required=True)
-@click.option('--habilitacion/--produccion', default=False)
-@click.option('--password')
-@click.argument('filename', required=True)
-@click.argument('zipfile', type=click.Path(exists=True))
-def soap_send_nomina_sync(private_key, public_key, habilitacion, password, filename, zipfile):
-    from facho.fe.client import dian
-
-    client = dian.DianSignatureClient(private_key, public_key, password=password)
-    req = dian.SendNominaSync
-    if habilitacion:
-        req = dian.Habilitacion.SendNominaSync
-    resp = client.request(req(
-        open(zipfile, 'rb').read()
-    ))
-    print(resp)
-
-@click.command()
-@click.option('--private-key', type=click.Path(exists=True))
-@click.option('--passphrase')
-@click.option('--ssl/--no-ssl', default=False)
-@click.option('--use-cache-policy/--no-use-cache-policy', default=False)
-@click.argument('xmlfile', type=click.Path(exists=True), required=True)
-def sign_verify_xml(private_key, passphrase, xmlfile, ssl=True, use_cache_policy=False, output=None):
-    if not ssl:
-        disable_ssl()
-
-    from facho.fe import fe
-    if use_cache_policy:
-        warnings.warn("xades using cache policy")
-
-    print("THIS ONLY WORKS FOR DOCUMENTS GENERATE WITH FACHO")
-    signer = fe.DianXMLExtensionSignerVerifier(private_key, passphrase=passphrase, localpolicy=use_cache_policy)
-    document = open(xmlfile, 'r').read().encode('utf-8')
-
-    if signer.verify_string(document):
-        print("+OK")
-    else:
-        print("-INVALID")
-
-@click.command()
-@click.option('--software-id')
-@click.option('--software-pin')
-@click.option('--nit')
-@click.option('--dv')
-@click.option('--output-zippath')
-def generate_nomina_habilitacion(software_id, software_pin, nit, dv, output_zippath):
-    from facho import fe
-
-    generador = fe.nomina.habilitacion.Habilitacion(
-        fe.nomina.habilitacion.Habilitacion.Metadata(
-            software_id=software_id,
-            software_pin=software_pin,
-            nit=nit,
-            dv=dv
-        )
-    )
-    generador.generar(output_zippath)
 
 @click.group()
 def main():
+    """CLI para facturacion electronica DIAN Colombia."""
     pass
 
-main.add_command(consultaResolucionesFacturacion)
-main.add_command(soap_send_test_set_async)
-main.add_command(soap_send_bill_async)
-main.add_command(soap_send_bill_sync)
-main.add_command(soap_get_status)
-main.add_command(soap_get_status_zip)
-main.add_command(soap_get_numbering_range)
-main.add_command(generate_invoice)
-main.add_command(validate_invoice)
+
+main.add_command(get_status_zip)
+main.add_command(send_test_set_async)
+main.add_command(send_bill_sync)
 main.add_command(sign_xml)
-main.add_command(sign_verify_xml)
-main.add_command(generate_nomina)
-main.add_command(soap_send_nomina_sync)
-main.add_command(validate_nominaindividual)
-main.add_command(generate_nomina_habilitacion)
+main.add_command(version)
