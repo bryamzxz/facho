@@ -35,195 +35,131 @@ pip install -e .
 
 ### Modulos Principales
 
-- `facho.fe.form`: Modelos de datos (Invoice, Party, Amount, etc.)
-- `facho.fe.form_xml`: Generadores XML (DIANInvoiceXML, etc.)
-- `facho.fe.fe`: Extensiones DIAN (CUFE, firma, etc.)
-- `facho.fe.client.dian`: Cliente para servicios web DIAN
+El proyecto ofrece dos formas de uso:
+
+**Paquete modular `dian_fe` (recomendado):**
+- `dian_fe.InvoiceBuilder`: Constructor de facturas XML
+- `dian_fe.CreditNoteBuilder`: Constructor de notas credito
+- `dian_fe.DebitNoteBuilder`: Constructor de notas debito
+- `dian_fe.XAdESSigner`: Firma XAdES-EPES
+- `dian_fe.DianClient`: Cliente para servicios web DIAN
+
+**Paquete clasico `facho.fe`:**
+- `facho.fe.builders`: Constructores XML UBL 2.1
+- `facho.fe.signing`: Firma XAdES-EPES
+- `facho.fe.client`: Cliente para servicios web DIAN
 
 ### Flujo de Trabajo
 
-1. **Modelar** el documento usando `facho.fe.form`
-2. **Configurar extensiones** DIAN usando `facho.fe.fe`
-3. **Generar XML** usando `facho.fe.form_xml`
-4. **Firmar** el documento
-5. **Enviar** a DIAN (opcional)
+1. **Configurar** los datos de la empresa y resolucion
+2. **Crear** el documento usando un Builder
+3. **Firmar** el documento con XAdESSigner
+4. **Enviar** a DIAN (opcional)
 
 ## Factura de Venta Nacional
 
 ### Ejemplo Completo
 
 ```python
-import facho.fe.form as form
-import facho.fe.form_xml as form_xml
-import facho.fe.fe as fe
-from datetime import datetime
-
-# Configuracion
-PRIVATE_KEY_PATH = 'ruta/certificado.p12'
-PRIVATE_PASSPHRASE = 'password'
-SOFTWARE_ID = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
-SOFTWARE_PIN = '12345'
-TECHNICAL_KEY = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-NIT_EMPRESA = '900123456'
-DV_EMPRESA = '7'
-
-# Crear factura de venta nacional
-inv = form.NationalSalesInvoice()
-
-# Periodo de facturacion
-inv.set_period(datetime.now(), datetime.now())
-
-# Fecha de emision
-inv.set_issue(datetime.now())
-
-# Identificador: Prefijo + Consecutivo
-inv.set_ident('SETP990003033')
-
-# Tipo de operacion (ver seccion 6.1.5 del Anexo)
-# 10 = Estandar
-# 09 = AIU
-# 11 = Mandatos
-inv.set_operation_type('10')
-
-# Configurar proveedor (emisor)
-inv.set_supplier(form.Party(
-    legal_name='MI EMPRESA SAS',
-    name='MI EMPRESA SAS',
-    ident=form.PartyIdentification(NIT_EMPRESA, DV_EMPRESA, '31'),  # NIT
-    responsability_code=form.Responsability(['O-07', 'O-09', 'O-14', 'O-48']),
-    responsability_regime_code='48',  # Responsable de IVA
-    organization_code='1',  # Persona Juridica
-    email='facturacion@miempresa.com',
-    address=form.Address(
-        name='Sede Principal',
-        street='Calle 123 #45-67',
-        city=form.City('05001', 'Medellin'),
-        country=form.Country('CO', 'Colombia'),
-        countrysubentity=form.CountrySubentity('05', 'Antioquia')
-    )
-))
-
-# Configurar cliente (adquiriente)
-inv.set_customer(form.Party(
-    legal_name='CLIENTE EJEMPLO LTDA',
-    name='CLIENTE EJEMPLO LTDA',
-    ident=form.PartyIdentification('800123456', '1', '31'),  # NIT
-    responsability_code=form.Responsability(['O-48']),
-    responsability_regime_code='48',
-    organization_code='1',
-    email='contabilidad@cliente.com',
-    address=form.Address(
-        name='',
-        street='Carrera 10 #20-30',
-        city=form.City('11001', 'Bogota'),
-        country=form.Country('CO', 'Colombia'),
-        countrysubentity=form.CountrySubentity('11', 'Bogota')
-    )
-))
-
-# Metodo de pago
-inv.set_payment_mean(form.PaymentMean(
-    id='1',      # 1=Contado, 2=Credito
-    code='10',   # Efectivo (ver seccion 3.4.2)
-    due_at=datetime.now(),
-    payment_id='1'
-))
-
-# Agregar lineas de factura
-inv.add_invoice_line(form.InvoiceLine(
-    quantity=form.Quantity(2, '94'),  # 94 = Unidad
-    description='Producto de ejemplo',
-    item=form.StandardItem('PROD001', 'Producto de ejemplo'),
-    price=form.Price(
-        amount=form.Amount(50000.00),
-        type_code='01',  # Precio unitario
-        type='Precio unitario'
-    ),
-    tax=form.TaxTotal(
-        subtotals=[
-            form.TaxSubTotal(
-                percent=19.00,
-                scheme=form.TaxScheme('01')  # IVA
-            )
-        ]
-    )
-))
-
-# Agregar segunda linea
-inv.add_invoice_line(form.InvoiceLine(
-    quantity=form.Quantity(1, '94'),
-    description='Servicio profesional',
-    item=form.StandardItem('SERV001', 'Servicio profesional'),
-    price=form.Price(
-        amount=form.Amount(200000.00),
-        type_code='01',
-        type='Precio unitario'
-    ),
-    tax=form.TaxTotal(
-        subtotals=[
-            form.TaxSubTotal(
-                percent=19.00,
-                scheme=form.TaxScheme('01')
-            )
-        ]
-    )
-))
-
-# Calcular totales
-inv.calculate()
-
-# Crear extensiones DIAN
-def extensions(invoice):
-    # Codigo de seguridad del software
-    security_code = fe.DianXMLExtensionSoftwareSecurityCode(
-        SOFTWARE_ID,
-        SOFTWARE_PIN,
-        invoice.invoice_ident
-    )
-
-    # Proveedor de autorizacion
-    authorization_provider = fe.DianXMLExtensionAuthorizationProvider()
-
-    # CUFE (Codigo Unico de Factura Electronica)
-    cufe = fe.DianXMLExtensionCUFE(
-        invoice,
-        fe.DianXMLExtensionCUFE.AMBIENTE_PRUEBAS,  # o AMBIENTE_PRODUCCION
-        TECHNICAL_KEY
-    )
-
-    # Proveedor de software
-    nit = form.PartyIdentification(NIT_EMPRESA, DV_EMPRESA, '31')
-    software_provider = fe.DianXMLExtensionSoftwareProvider(
-        nit,
-        nit.dv,
-        SOFTWARE_ID
-    )
-
-    # Autorizacion de numeracion
-    inv_authorization = fe.DianXMLExtensionInvoiceAuthorization(
-        'numero_autorizacion',
-        datetime(2024, 1, 1),   # Fecha inicio
-        datetime(2026, 12, 31), # Fecha fin
-        'SETP',                  # Prefijo
-        990000001,               # Desde
-        995000000                # Hasta
-    )
-
-    return [security_code, authorization_provider, cufe, software_provider, inv_authorization]
-
-# Generar XML
-xml = form_xml.DIANInvoiceXML(inv)
-for extension in extensions(inv):
-    xml.add_extension(extension)
-
-# Escribir archivo firmado
-form_xml.utils.DIANWriteSigned(
-    xml,
-    'factura_firmada.xml',
-    PRIVATE_KEY_PATH,
-    PRIVATE_PASSPHRASE,
-    True  # Incluir archivo adjunto
+from dian_fe import (
+    InvoiceBuilder, InvoiceConfig, Party, Address, InvoiceLine,
+    XAdESSigner, DianClient
 )
+
+# Configuracion de la empresa y resolucion DIAN
+config = InvoiceConfig(
+    software_id='xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+    software_pin='12345',
+    technical_key='clave_tecnica_asignada_por_dian',
+    nit='900123456',
+    company_name='MI EMPRESA SAS',
+    resolution_number='18760000001',
+    resolution_date='2024-01-01',
+    resolution_end_date='2026-12-31',
+    prefix='SETP',
+    range_from='990000001',
+    range_to='995000000',
+    environment='2'  # 1=Produccion, 2=Habilitacion
+)
+
+# Proveedor (emisor)
+supplier = Party(
+    nit='900123456',
+    dv='7',
+    name='MI EMPRESA SAS',
+    doc_type='31',  # NIT
+    tax_scheme='O-48',  # Responsable de IVA
+    organization_type='1',  # Persona Juridica
+    email='facturacion@miempresa.com',
+    address=Address(
+        street='Calle 123 #45-67',
+        city_code='05001',
+        city_name='Medellin',
+        department_code='05',
+        department_name='Antioquia',
+        country_code='CO'
+    )
+)
+
+# Cliente (adquiriente)
+customer = Party(
+    nit='800123456',
+    dv='1',
+    name='CLIENTE EJEMPLO LTDA',
+    doc_type='31',  # NIT
+    tax_scheme='O-48',
+    organization_type='1',
+    email='contabilidad@cliente.com',
+    address=Address(
+        street='Carrera 10 #20-30',
+        city_code='11001',
+        city_name='Bogota',
+        department_code='11',
+        department_name='Bogota',
+        country_code='CO'
+    )
+)
+
+# Lineas de factura
+lines = [
+    InvoiceLine(
+        quantity=2,
+        unit_code='94',  # Unidad
+        description='Producto de ejemplo',
+        price=50000.00,
+        tax_percent=19.0,
+        tax_code='01'  # IVA
+    ),
+    InvoiceLine(
+        quantity=1,
+        unit_code='94',
+        description='Servicio profesional',
+        price=200000.00,
+        tax_percent=19.0,
+        tax_code='01'
+    )
+]
+
+# Crear factura XML
+builder = InvoiceBuilder(config)
+xml = builder.build(
+    number='SETP990003033',
+    issue_date='2026-01-08',
+    issue_time='10:30:00-05:00',
+    supplier=supplier,
+    customer=customer,
+    lines=lines,
+    payment_means_code='10',  # Efectivo
+    payment_means_id='1'      # Contado
+)
+
+# Firmar con XAdES-EPES
+signer = XAdESSigner.from_pkcs12('certificado.p12', 'password')
+signed_xml = signer.sign(xml)
+
+# Guardar archivo firmado
+with open('factura_firmada.xml', 'wb') as f:
+    f.write(signed_xml)
 ```
 
 ### Tipos de Identificacion Fiscal
@@ -261,33 +197,33 @@ form_xml.utils.DIANWriteSigned(
 ## Notas Credito
 
 ```python
-import facho.fe.form as form
-import facho.fe.form_xml as form_xml
-from datetime import datetime, date
+from dian_fe import CreditNoteBuilder, InvoiceConfig, Party, Address, InvoiceLine, XAdESSigner
 
-# Referencia a la factura original
-billing_ref = form.CreditNoteDocumentReference(
-    ident='SETP990003033',           # Numero de factura
-    uuid='cufe-de-la-factura-original',
-    date=date(2024, 1, 15)           # Fecha de la factura
+# Usar la misma configuracion de la factura
+config = InvoiceConfig(...)
+
+# Crear builder de nota credito
+builder = CreditNoteBuilder(config)
+
+# Generar nota credito
+xml = builder.build(
+    number='NC0001990001',
+    issue_date='2026-01-08',
+    issue_time='10:30:00-05:00',
+    supplier=supplier,
+    customer=customer,
+    lines=lines,
+    # Referencia a la factura original
+    billing_reference_number='SETP990003033',
+    billing_reference_cufe='cufe-de-la-factura-original',
+    billing_reference_date='2024-01-15',
+    # Concepto de nota credito
+    discrepancy_response_code='1'  # 1=Devolucion parcial de bienes
 )
 
-# Crear nota credito
-credit_note = form.CreditNote(billing_ref)
-
-# Configurar datos basicos
-credit_note.set_period(datetime.now(), datetime.now())
-credit_note.set_issue(datetime.now())
-credit_note.set_ident('NC0001990001')  # Prefijo NC + consecutivo
-credit_note.set_operation_type('1')    # Devolucion parcial de bienes
-
-# ... configurar supplier, customer, lines igual que factura ...
-
-credit_note.calculate()
-
-# Generar XML
-xml = form_xml.DIANCreditNoteXML(credit_note)
-# ... agregar extensiones y firmar ...
+# Firmar
+signer = XAdESSigner.from_pkcs12('certificado.p12', 'password')
+signed_xml = signer.sign(xml)
 ```
 
 ### Conceptos de Nota Credito (Anexo 1.9)
@@ -306,22 +242,33 @@ xml = form_xml.DIANCreditNoteXML(credit_note)
 ## Notas Debito
 
 ```python
-import facho.fe.form as form
-from datetime import date
+from dian_fe import DebitNoteBuilder, InvoiceConfig, Party, Address, InvoiceLine, XAdESSigner
 
-# Referencia a la factura original
-billing_ref = form.DebitNoteDocumentReference(
-    ident='SETP990003033',
-    uuid='cufe-de-la-factura-original',
-    date=date(2024, 1, 15)
+# Usar la misma configuracion de la factura
+config = InvoiceConfig(...)
+
+# Crear builder de nota debito
+builder = DebitNoteBuilder(config)
+
+# Generar nota debito
+xml = builder.build(
+    number='ND0001990001',
+    issue_date='2026-01-08',
+    issue_time='10:30:00-05:00',
+    supplier=supplier,
+    customer=customer,
+    lines=lines,
+    # Referencia a la factura original
+    billing_reference_number='SETP990003033',
+    billing_reference_cufe='cufe-de-la-factura-original',
+    billing_reference_date='2024-01-15',
+    # Concepto de nota debito
+    discrepancy_response_code='1'  # 1=Intereses
 )
 
-# Crear nota debito
-debit_note = form.DebitNote(billing_ref)
-debit_note.set_ident('ND0001990001')
-debit_note.set_operation_type('1')  # Intereses
-
-# ... configurar resto igual que nota credito ...
+# Firmar
+signer = XAdESSigner.from_pkcs12('certificado.p12', 'password')
+signed_xml = signer.sign(xml)
 ```
 
 ### Conceptos de Nota Debito
@@ -335,118 +282,132 @@ debit_note.set_operation_type('1')  # Intereses
 
 ## Documento Soporte
 
-Para adquisiciones a sujetos no obligados a expedir factura:
+Para adquisiciones a sujetos no obligados a expedir factura, use el InvoiceBuilder
+con el tipo de documento apropiado:
 
 ```python
-import facho.fe.form as form
-import facho.fe.form_xml as form_xml
+from dian_fe import InvoiceBuilder, InvoiceConfig, Party, Address, InvoiceLine, XAdESSigner
 
-# Crear documento soporte
-doc = form.SupportDocument()
-doc.set_ident('DS0001990001')
-doc.set_operation_type('10')  # Estandar
+# Configuracion para documento soporte
+config = InvoiceConfig(
+    software_id='...',
+    software_pin='...',
+    technical_key='...',
+    nit='900123456',
+    company_name='MI EMPRESA SAS',
+    resolution_number='...',
+    resolution_date='...',
+    resolution_end_date='...',
+    prefix='DS',
+    range_from='1',
+    range_to='1000000',
+    environment='2'
+)
 
-# Configurar proveedor (quien adquiere)
-doc.set_supplier(form.Party(
+# El adquiriente es quien emite el documento soporte
+supplier = Party(
+    nit='900123456',
+    dv='7',
+    name='MI EMPRESA SAS',
     # ... datos del adquiriente ...
-))
+)
 
-# Configurar vendedor (sujeto no obligado)
-doc.set_customer(form.Party(
+# El vendedor es el sujeto no obligado a facturar
+customer = Party(
+    nit='1234567890',
+    dv='',
+    name='VENDEDOR PERSONA NATURAL',
+    doc_type='13',  # Cedula
     # ... datos del vendedor ...
-))
+)
 
-# Agregar retenciones si aplica
-doc.add_withholding_tax_total(form.WithholdingTaxTotal(
-    subtotals=[
-        form.WithholdingTaxSubTotal(
-            percent=2.5,
-            scheme=form.TaxScheme('06')  # ReteFuente
-        )
-    ]
-))
+# Lineas con retenciones si aplica
+lines = [
+    InvoiceLine(
+        quantity=1,
+        unit_code='94',
+        description='Servicio adquirido',
+        price=1000000.00,
+        tax_percent=0.0,
+        withholding_percent=2.5,  # ReteFuente
+        withholding_code='06'
+    )
+]
 
-doc.add_invoice_line(form.InvoiceLine(
-    # ... datos de la linea ...
-))
+builder = InvoiceBuilder(config)
+xml = builder.build(
+    number='DS0001990001',
+    issue_date='2026-01-08',
+    issue_time='10:30:00-05:00',
+    supplier=supplier,
+    customer=customer,
+    lines=lines,
+    document_type='05'  # Documento Soporte
+)
 
-doc.calculate()
-
-# Generar XML
-xml = form_xml.DIANSupportDocumentXML(doc)
+signer = XAdESSigner.from_pkcs12('certificado.p12', 'password')
+signed_xml = signer.sign(xml)
 ```
 
 ## Extensiones DIAN
 
-Las extensiones DIAN agregan informacion requerida por la DIAN al documento UBL:
+El paquete `dian_fe` genera automaticamente todas las extensiones DIAN requeridas
+a partir de la configuracion `InvoiceConfig`:
 
-### DianXMLExtensionCUFE
-
-Genera el CUFE (Codigo Unico de Factura Electronica) usando SHA-384:
+- **CUFE/CUDE**: Codigo unico calculado con SHA-384
+- **SoftwareSecurityCode**: Codigo de seguridad del software
+- **InvoiceAuthorization**: Datos de la resolucion de numeracion
+- **SoftwareProvider**: Identificacion del proveedor de software
 
 ```python
-cufe = fe.DianXMLExtensionCUFE(
-    invoice,
-    fe.DianXMLExtensionCUFE.AMBIENTE_PRODUCCION,
-    'clave_tecnica_asignada_por_dian'
+from dian_fe import calcular_cufe, calcular_cude, calcular_software_security_code, calcular_dv
+
+# Calcular CUFE manualmente (normalmente lo hace el builder)
+cufe = calcular_cufe(
+    numero_factura='SETP990003033',
+    fecha_factura='2026-01-08',
+    hora_factura='10:30:00-05:00',
+    valor_factura='300000.00',
+    codigo_impuesto_1='01',
+    valor_impuesto_1='57000.00',
+    codigo_impuesto_2='04',
+    valor_impuesto_2='0.00',
+    codigo_impuesto_3='03',
+    valor_impuesto_3='0.00',
+    valor_total='357000.00',
+    nit_emisor='900123456',
+    nit_adquiriente='800123456',
+    clave_tecnica='clave_tecnica_dian',
+    ambiente='2'  # 1=Produccion, 2=Habilitacion
 )
-```
 
-### DianXMLExtensionInvoiceAuthorization
+# Calcular digito de verificacion
+dv = calcular_dv('900123456')  # Retorna '7'
 
-Informacion de autorizacion de numeracion:
-
-```python
-auth = fe.DianXMLExtensionInvoiceAuthorization(
-    'numero_resolucion',
-    datetime(2024, 1, 1),   # Fecha inicio
-    datetime(2026, 12, 31), # Fecha fin
-    'SETP',                  # Prefijo autorizado
-    1,                       # Numero desde
-    1000000                  # Numero hasta
-)
-```
-
-### DianXMLExtensionSoftwareProvider
-
-Identificacion del proveedor de software:
-
-```python
-nit = form.PartyIdentification('900123456', '7', '31')
-provider = fe.DianXMLExtensionSoftwareProvider(
-    nit,
-    nit.dv,
-    'id_software_asignado_por_dian'
-)
-```
-
-### DianXMLExtensionSoftwareSecurityCode
-
-Codigo de seguridad del software:
-
-```python
-security = fe.DianXMLExtensionSoftwareSecurityCode(
-    'id_software',
-    'pin_software',
-    'SETP990003033'  # Numero de factura
+# Codigo de seguridad del software
+security_code = calcular_software_security_code(
+    software_id='xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+    software_pin='12345',
+    numero_factura='SETP990003033'
 )
 ```
 
 ## Firma Digital
 
-Facho implementa XAdES-EPES con politica de firma DIAN v2:
+El paquete `dian_fe` implementa XAdES-EPES con politica de firma DIAN v2:
 
 ```python
-import facho.fe.form_xml.utils as utils
+from dian_fe import XAdESSigner
 
-# Firmar documento
-utils.DIANWriteSigned(
-    xml,                      # DIANInvoiceXML o similar
-    'documento_firmado.xml',  # Ruta de salida
-    'certificado.p12',        # Certificado PKCS#12
-    'password',               # Contraseña del certificado
-    True                      # Incluir attached document
-)
+# Cargar certificado desde archivo PKCS#12
+signer = XAdESSigner.from_pkcs12('certificado.p12', 'password')
+
+# Firmar documento XML (bytes o string)
+signed_xml = signer.sign(xml_content)
+
+# Guardar documento firmado
+with open('documento_firmado.xml', 'wb') as f:
+    f.write(signed_xml)
 ```
 
 ### Requisitos del Certificado
@@ -458,28 +419,42 @@ utils.DIANWriteSigned(
 ## Envio a DIAN
 
 ```python
-from facho.fe.client.dian import DianClient, Habilitacion
+from dian_fe import DianClient
+import zipfile
+import io
 
-# Configurar cliente
-client = DianClient(
-    Habilitacion.HABILITACION,  # o PRODUCCION
-    'certificado.p12',
-    'password'
-)
+# Crear cliente DIAN
+client = DianClient.from_pkcs12('certificado.p12', 'password')
 
-# Enviar documento
+# Leer documento firmado
 with open('documento_firmado.xml', 'rb') as f:
     xml_content = f.read()
 
-response = client.send(xml_content, 'nombre_archivo.xml')
+# Crear ZIP con el documento
+zip_buffer = io.BytesIO()
+with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr('fv001.xml', xml_content)
+zip_content = zip_buffer.getvalue()
+
+# Enviar a ambiente de habilitacion (test set)
+response = client.send_test_set_async(
+    'fv001.zip',
+    zip_content,
+    test_set_id='id_set_pruebas_dian'
+)
 
 # Verificar respuesta
 if response.is_valid:
-    print(f"CUFE: {response.cufe}")
-    print(f"Fecha: {response.fecha}")
+    print(f"ZipKey: {response.zip_key}")
+    print(f"Status: {response.status_code}")
 else:
+    print(f"Error: {response.status_description}")
     for error in response.errors:
-        print(f"Error: {error}")
+        print(f"  - {error}")
+
+# Consultar estado de procesamiento
+status = client.get_status(track_id=response.zip_key)
+print(f"Estado: {status.status_description}")
 ```
 
 ## CLI
@@ -505,40 +480,40 @@ facho send documento.xml --env produccion --key cert.p12 --password clave
 
 ## Validacion
 
-Facho incluye validacion contra los codelists oficiales de la DIAN:
+El paquete `dian_fe` incluye constantes con los codigos oficiales de la DIAN:
 
 ```python
-import facho.fe.form as form
+from dian_fe import DOC_TYPES, TAX_CODES, CREDIT_REASONS, DEBIT_REASONS
 
-# Validacion automatica al crear objetos
-try:
-    # Codigo de ciudad invalido
-    city = form.City('99999', 'Ciudad Invalida')
-except ValueError as e:
-    print(f"Error: {e}")
+# Tipos de documento de identidad
+print(DOC_TYPES)
+# {'11': 'Registro civil', '13': 'Cedula', '31': 'NIT', ...}
 
-# Codigo de impuesto invalido
-try:
-    scheme = form.TaxScheme('99')
-except ValueError as e:
-    print(f"Error: {e}")
+# Codigos de impuesto
+print(TAX_CODES)
+# {'01': 'IVA', '02': 'IC', '03': 'ICA', '04': 'INC', ...}
 
-# Tipo de documento invalido
-try:
-    ident = form.PartyIdentification('123', '', '99')
-except ValueError as e:
-    print(f"Error: {e}")
+# Conceptos de nota credito
+print(CREDIT_REASONS)
+# {'1': 'Devolucion parcial', '2': 'Anulacion', '3': 'Rebaja', ...}
+
+# Conceptos de nota debito
+print(DEBIT_REASONS)
+# {'1': 'Intereses', '2': 'Gastos por cobrar', ...}
 ```
 
-### Validador de Resolucion
+### Validacion de Datos
 
 ```python
-validator = form.DianResolucion0001Validator()
+from dian_fe import calcular_dv
 
-if not validator.validate(invoice):
-    for error in validator.errors:
-        print(f"Error: {error}")
-    raise RuntimeError("Factura invalida")
+# Validar NIT calculando el digito de verificacion
+nit = '900123456'
+dv_calculado = calcular_dv(nit)
+dv_proporcionado = '7'
+
+if dv_calculado != dv_proporcionado:
+    raise ValueError(f"DV incorrecto: esperado {dv_calculado}, recibido {dv_proporcionado}")
 ```
 
 ## Errores Comunes
