@@ -77,7 +77,6 @@ class InvoiceConfig:
     software_id: str
     software_pin: str
     technical_key: str
-    test_set_id: str = ''
 
     # Empresa
     nit: str
@@ -91,7 +90,8 @@ class InvoiceConfig:
     range_from: str
     range_to: str
 
-    # Ambiente
+    # Opcionales con valores por defecto
+    test_set_id: str = ''
     environment: str = '2'  # '1'=Produccion, '2'=Pruebas
 
 
