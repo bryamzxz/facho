@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from lxml import etree
 
-from .constants import NS, DIAN_PROFILE_ID_CREDIT_NOTE
+from .constants import NS, DIAN_PROFILE_ID_CREDIT_NOTE, CUSTOMIZATION_ID_CREDIT_NOTE
 from .invoice_builder import (
     InvoiceBuilder,
     InvoiceConfig,
@@ -219,10 +219,11 @@ class CreditNoteBuilder(InvoiceBuilder):
         cude: str
     ):
         """Agregar elementos basicos de nota credito."""
-        from .constants import DIAN_UBL_VERSION, DIAN_CUSTOMIZATION_ID
+        from .constants import DIAN_UBL_VERSION
 
         etree.SubElement(credit_note, '{%s}UBLVersionID' % NS['cbc']).text = DIAN_UBL_VERSION
-        etree.SubElement(credit_note, '{%s}CustomizationID' % NS['cbc']).text = DIAN_CUSTOMIZATION_ID
+        # CustomizationID para notas credito es 20
+        etree.SubElement(credit_note, '{%s}CustomizationID' % NS['cbc']).text = CUSTOMIZATION_ID_CREDIT_NOTE
         etree.SubElement(credit_note, '{%s}ProfileID' % NS['cbc']).text = DIAN_PROFILE_ID_CREDIT_NOTE
         etree.SubElement(
             credit_note, '{%s}ProfileExecutionID' % NS['cbc']
