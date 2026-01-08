@@ -124,6 +124,11 @@ class XAdESSigner:
             ext_ns
         )
 
+    # Alias para compatibilidad
+    def sign_xml(self, xml_element: etree._Element, ext_ns: str = None) -> etree._Element:
+        """Alias de sign() para compatibilidad."""
+        return self.sign(xml_element, ext_ns)
+
     def verify(self, signed_element: etree._Element) -> bool:
         """
         Verificar firma de documento XML.
