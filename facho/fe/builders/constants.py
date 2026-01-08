@@ -58,3 +58,55 @@ COUNTRY_ID_ATTRS = {
 
 # ID del proveedor de autorizacion (DIAN)
 AUTHORIZATION_PROVIDER_ID = '800197268'
+
+# CustomizationID por tipo de documento
+CUSTOMIZATION_ID_INVOICE = '10'
+CUSTOMIZATION_ID_CREDIT_NOTE = '20'
+CUSTOMIZATION_ID_DEBIT_NOTE = '30'
+
+# Motivos para notas credito (ResponseCode)
+CREDIT_REASONS = {
+    '1': 'Devolucion parcial de los bienes y/o no aceptacion parcial del servicio',
+    '2': 'Anulacion de factura electronica',
+    '3': 'Rebaja o descuento parcial o total',
+    '4': 'Ajuste de precio',
+}
+
+# Motivos para notas debito (ResponseCode)
+DEBIT_REASONS = {
+    '1': 'Intereses',
+    '2': 'Gastos por cobrar',
+    '3': 'Cambio del valor',
+    '4': 'Otros',
+}
+
+# Tipos de documento soportados
+DOC_TYPES = {
+    'factura': {
+        'code': INVOICE_TYPE_CODE,
+        'prefix_file': 'fv',
+        'root_element': 'Invoice',
+        'namespace': 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
+        'profile_id': DIAN_PROFILE_ID,
+        'uuid_name': 'CUFE-SHA384',
+        'customization_id': CUSTOMIZATION_ID_INVOICE,
+    },
+    'credito': {
+        'code': CREDIT_NOTE_TYPE_CODE,
+        'prefix_file': 'nc',
+        'root_element': 'CreditNote',
+        'namespace': 'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2',
+        'profile_id': DIAN_PROFILE_ID_CREDIT_NOTE,
+        'uuid_name': 'CUDE-SHA384',
+        'customization_id': CUSTOMIZATION_ID_CREDIT_NOTE,
+    },
+    'debito': {
+        'code': DEBIT_NOTE_TYPE_CODE,
+        'prefix_file': 'nd',
+        'root_element': 'DebitNote',
+        'namespace': 'urn:oasis:names:specification:ubl:schema:xsd:DebitNote-2',
+        'profile_id': DIAN_PROFILE_ID_DEBIT_NOTE,
+        'uuid_name': 'CUDE-SHA384',
+        'customization_id': CUSTOMIZATION_ID_DEBIT_NOTE,
+    },
+}

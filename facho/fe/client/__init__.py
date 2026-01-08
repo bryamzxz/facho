@@ -10,7 +10,15 @@ from .dian_simple import (
     SendBillSyncResponse,
     calcular_dv,
     calcular_cufe,
+    calcular_cude,
     calcular_software_security_code,
+)
+
+# Sistema de tracking de documentos
+from .tracker import (
+    DocumentTracker,
+    TrackedDocument,
+    TrackingData,
 )
 
 # Cliente legacy (requiere zeep)

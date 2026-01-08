@@ -10,8 +10,9 @@ Basado en implementacion funcional aprobada por DIAN.
 import uuid
 import base64
 import hashlib
+import time
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Callable
 from dataclasses import dataclass
 
 import requests
@@ -446,6 +447,198 @@ class DianSimpleClient:
 
         return response
 
+    # =========================================================================
+    # METODOS DE VERIFICACION Y BATCH
+    # =========================================================================
+
+    def verify_status_with_retry(
+        self,
+        zip_key: str,
+        wait_seconds: int = 10,
+        max_retries: int = 3,
+        on_retry: Callable[[int], None] = None
+    ) -> GetStatusZipResponse:
+        """
+        Verificar estado de documento con espera y reintentos.
+
+        Args:
+            zip_key: ZipKey del documento
+            wait_seconds: Segundos a esperar antes de verificar
+            max_retries: Numero maximo de reintentos
+            on_retry: Callback opcional llamado en cada reintento
+
+        Returns:
+            GetStatusZipResponse con el estado del documento
+        """
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+        for attempt in range(max_retries):
+            try:
+                response = self.get_status_zip(zip_key)
+
+                # Si tenemos un estado definitivo, retornar
+                if response.is_valid is not None:
+                    return response
+
+                # Si no hay estado, esperar y reintentar
+                if attempt < max_retries - 1:
+                    if on_retry:
+                        on_retry(attempt + 1)
+                    time.sleep(wait_seconds)
+
+            except requests.RequestException:
+                if attempt < max_retries - 1:
+                    time.sleep(wait_seconds)
+                else:
+                    raise
+
+        return response
+
+    def send_and_verify(
+        self,
+        file_name: str,
+        content_file: bytes,
+        test_set_id: str = None,
+        wait_seconds: int = 10,
+        verify: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Enviar documento y verificar estado.
+
+        Args:
+            file_name: Nombre del archivo ZIP
+            content_file: Contenido del archivo ZIP en bytes
+            test_set_id: ID del set de pruebas (si es habilitacion)
+            wait_seconds: Segundos a esperar antes de verificar
+            verify: Si se debe verificar el estado despues de enviar
+
+        Returns:
+            Diccionario con resultado del envio y verificacion
+        """
+        result = {
+            'send_response': None,
+            'status_response': None,
+            'is_valid': None,
+            'zip_key': None,
+            'error': None,
+        }
+
+        try:
+            # Enviar documento
+            if test_set_id:
+                send_response = self.send_test_set_async(file_name, content_file, test_set_id)
+            else:
+                send_response = self.send_bill_async(file_name, content_file)
+
+            result['send_response'] = send_response
+            result['zip_key'] = send_response.zip_key
+
+            # Verificar estado si se obtuvo ZipKey
+            if verify and send_response.zip_key:
+                status_response = self.verify_status_with_retry(
+                    send_response.zip_key,
+                    wait_seconds=wait_seconds
+                )
+                result['status_response'] = status_response
+                result['is_valid'] = status_response.is_valid
+
+        except Exception as e:
+            result['error'] = str(e)
+
+        return result
+
+    def send_batch(
+        self,
+        documents: List[Dict[str, Any]],
+        test_set_id: str = None,
+        verify: bool = True,
+        wait_seconds: int = 10,
+        on_document_sent: Callable[[int, Dict], None] = None,
+        on_document_verified: Callable[[int, Dict], None] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Enviar lote de documentos a DIAN.
+
+        Args:
+            documents: Lista de diccionarios con 'file_name' y 'content_file'
+            test_set_id: ID del set de pruebas (si es habilitacion)
+            verify: Si se debe verificar cada documento
+            wait_seconds: Segundos a esperar entre verificaciones
+            on_document_sent: Callback tras enviar cada documento
+            on_document_verified: Callback tras verificar cada documento
+
+        Returns:
+            Lista de resultados para cada documento
+
+        Ejemplo:
+            documents = [
+                {'file_name': 'fv001.zip', 'content_file': bytes1},
+                {'file_name': 'fv002.zip', 'content_file': bytes2},
+            ]
+            results = client.send_batch(documents, test_set_id='...')
+        """
+        results = []
+
+        for idx, doc in enumerate(documents):
+            result = self.send_and_verify(
+                file_name=doc['file_name'],
+                content_file=doc['content_file'],
+                test_set_id=test_set_id,
+                wait_seconds=wait_seconds,
+                verify=verify
+            )
+
+            result['index'] = idx
+            result['file_name'] = doc['file_name']
+            results.append(result)
+
+            if on_document_sent:
+                on_document_sent(idx, result)
+
+            if verify and result.get('status_response') and on_document_verified:
+                on_document_verified(idx, result)
+
+        return results
+
+    def verify_pending_batch(
+        self,
+        zip_keys: List[str],
+        wait_seconds: int = 5,
+        on_verified: Callable[[str, GetStatusZipResponse], None] = None
+    ) -> Dict[str, GetStatusZipResponse]:
+        """
+        Verificar estado de multiples documentos pendientes.
+
+        Args:
+            zip_keys: Lista de ZipKeys a verificar
+            wait_seconds: Segundos a esperar entre verificaciones
+            on_verified: Callback tras verificar cada documento
+
+        Returns:
+            Diccionario con ZipKey -> GetStatusZipResponse
+        """
+        results = {}
+
+        for zip_key in zip_keys:
+            try:
+                response = self.get_status_zip(zip_key)
+                results[zip_key] = response
+
+                if on_verified:
+                    on_verified(zip_key, response)
+
+                if wait_seconds > 0:
+                    time.sleep(wait_seconds)
+
+            except Exception:
+                results[zip_key] = GetStatusZipResponse(
+                    is_valid=None,
+                    status_description='Error al consultar estado'
+                )
+
+        return results
+
 
 # =============================================================================
 # FUNCIONES AUXILIARES
@@ -527,4 +720,49 @@ def calcular_software_security_code(
         Hash SHA-384 hexadecimal
     """
     cadena = f"{software_id}{pin}{numero_factura}"
+    return hashlib.sha384(cadena.encode('utf-8')).hexdigest()
+
+
+def calcular_cude(
+    numero: str,
+    fecha_emision: str,
+    hora_emision: str,
+    subtotal: float,
+    iva: float,
+    total: float,
+    nit_emisor: str,
+    nit_adquiriente: str,
+    software_pin: str,
+    tipo_ambiente: str = '2'
+) -> str:
+    """
+    Calcular CUDE segun especificacion DIAN.
+
+    El CUDE (Codigo Unico de Documento Electronico) se usa para
+    notas credito y notas debito.
+
+    Args:
+        numero: Numero del documento
+        fecha_emision: Fecha en formato YYYY-MM-DD
+        hora_emision: Hora en formato HH:MM:SS-05:00
+        subtotal: Valor subtotal
+        iva: Valor IVA
+        total: Valor total
+        nit_emisor: NIT del emisor
+        nit_adquiriente: NIT del adquiriente
+        software_pin: PIN del software DIAN
+        tipo_ambiente: '1' produccion, '2' pruebas
+
+    Returns:
+        CUDE en formato SHA-384 hexadecimal
+    """
+    # CUDE = SHA384(NumDoc + FecDoc + HoraDoc + ValorBruto + 01 + ValorIVA +
+    #               04 + 0 + 03 + 0 + ValorTotal + NitEmisor + NumAdquiriente +
+    #               SoftwarePIN + TipoAmbiente)
+    cadena = (
+        f"{numero}{fecha_emision}{hora_emision}"
+        f"{subtotal:.2f}01{iva:.2f}04{0:.2f}03{0:.2f}"
+        f"{total:.2f}{nit_emisor}{nit_adquiriente}"
+        f"{software_pin}{tipo_ambiente}"
+    )
     return hashlib.sha384(cadena.encode('utf-8')).hexdigest()
