@@ -23,7 +23,25 @@ from facho.fe.builders.invoice_builder import (
 from facho.fe.builders.credit_note_builder import CreditNoteBuilder, CreditNoteData
 from facho.fe.builders.debit_note_builder import DebitNoteBuilder, DebitNoteData
 from facho.fe.builders.constants import DOC_TYPES, CREDIT_REASONS, DEBIT_REASONS
-from facho.fe.client.dian_simple import calcular_dv, calcular_cufe, calcular_cude
+from facho.fe.builders.taxes import (
+    Tax,
+    TaxTotal,
+    truncar,
+    formato_dinero,
+    agrupar_impuestos,
+    separar_impuestos_retenciones,
+    calcular_totales_impuestos,
+    TAX_CODES,
+    TAX_NAMES,
+    WITHHOLDING_TAX_CODES,
+)
+from facho.fe.client.dian_simple import (
+    calcular_dv,
+    calcular_cufe,
+    calcular_cude,
+    calcular_cufe_flexible,
+    calcular_cude_flexible,
+)
 
 
 # =============================================================================
@@ -700,3 +718,414 @@ class TestElementOrder:
         assert billing_idx is not None, "BillingReference no encontrado"
         assert discrepancy_idx < billing_idx, \
             f"DiscrepancyResponse (idx={discrepancy_idx}) debe estar ANTES de BillingReference (idx={billing_idx})"
+
+
+# =============================================================================
+# TESTS DE SISTEMA DE IMPUESTOS FLEXIBLE (FASE 1)
+# =============================================================================
+
+class TestTruncamiento:
+    """Tests para funciones de truncamiento."""
+
+    def test_truncar_no_redondea(self):
+        """Test que truncar no redondee."""
+        assert truncar(123.456789, 2) == 123.45
+        assert truncar(99.999, 2) == 99.99
+        assert truncar(1.005, 2) == 1.00  # No redondea a 1.01
+
+    def test_truncar_diferentes_decimales(self):
+        """Test truncar con diferentes decimales."""
+        assert truncar(123.456789, 0) == 123.0
+        assert truncar(123.456789, 1) == 123.4
+        assert truncar(123.456789, 4) == 123.4567
+
+    def test_formato_dinero(self):
+        """Test formato monetario."""
+        assert formato_dinero(123.456) == '123.45'
+        assert formato_dinero(100000) == '100000.00'
+        assert formato_dinero(0.999) == '0.99'
+
+
+class TestTaxDataclass:
+    """Tests para la clase Tax."""
+
+    def test_tax_iva_19(self):
+        """Test creacion de IVA 19%."""
+        tax = Tax.iva_19(100000.0)
+        assert tax.code == '01'
+        assert tax.name == 'IVA'
+        assert tax.percent == 19.0
+        assert tax.taxable_amount == 100000.0
+        assert tax.amount == 19000.0
+        assert tax.is_withholding is False
+
+    def test_tax_iva_5(self):
+        """Test creacion de IVA 5%."""
+        tax = Tax.iva_5(100000.0)
+        assert tax.code == '01'
+        assert tax.percent == 5.0
+        assert tax.amount == 5000.0
+
+    def test_tax_iva_0(self):
+        """Test creacion de IVA 0%."""
+        tax = Tax.iva_0(100000.0)
+        assert tax.code == '01'
+        assert tax.percent == 0.0
+        assert tax.amount == 0.0
+
+    def test_tax_ica(self):
+        """Test creacion de ICA."""
+        tax = Tax.ica(0.966, 100000.0)
+        assert tax.code == '03'
+        assert tax.name == 'ICA'
+        assert tax.percent == 0.966
+        assert tax.amount == 966.0
+        assert tax.is_withholding is False
+
+    def test_tax_inc(self):
+        """Test creacion de INC."""
+        tax = Tax.inc(8.0, 100000.0)
+        assert tax.code == '04'
+        assert tax.name == 'INC'
+        assert tax.percent == 8.0
+        assert tax.amount == 8000.0
+
+    def test_tax_rete_fte(self):
+        """Test creacion de retencion en la fuente."""
+        tax = Tax.rete_fte(11.0, 100000.0)
+        assert tax.code == '06'
+        assert tax.name == 'ReteFte'
+        assert tax.percent == 11.0
+        assert tax.amount == 11000.0
+        assert tax.is_withholding is True
+
+    def test_tax_rete_iva(self):
+        """Test creacion de retencion de IVA."""
+        iva_amount = 19000.0
+        tax = Tax.rete_iva(iva_amount, 15.0)
+        assert tax.code == '05'
+        assert tax.name == 'ReteIVA'
+        assert tax.percent == 15.0
+        assert tax.amount == 2850.0  # 15% de 19000
+        assert tax.is_withholding is True
+
+    def test_tax_rete_ica(self):
+        """Test creacion de retencion de ICA."""
+        tax = Tax.rete_ica(1.2, 100000.0)
+        assert tax.code == '07'
+        assert tax.name == 'ReteICA'
+        assert tax.is_withholding is True
+
+    def test_withholding_codes(self):
+        """Test que codigos de retencion se detecten correctamente."""
+        assert '05' in WITHHOLDING_TAX_CODES  # ReteIVA
+        assert '06' in WITHHOLDING_TAX_CODES  # ReteFte
+        assert '07' in WITHHOLDING_TAX_CODES  # ReteICA
+        assert '01' not in WITHHOLDING_TAX_CODES  # IVA no es retencion
+
+
+class TestAgruparImpuestos:
+    """Tests para agrupacion de impuestos."""
+
+    def test_agrupar_impuestos_mismo_codigo(self):
+        """Test agrupacion de impuestos del mismo codigo."""
+        taxes = [
+            Tax.iva_19(50000.0),  # 9500
+            Tax.iva_19(30000.0),  # 5700
+        ]
+        agrupados = agrupar_impuestos(taxes)
+
+        assert '01' in agrupados
+        assert agrupados['01'].total_amount == 15200.0
+        assert agrupados['01'].total_taxable_amount == 80000.0
+
+    def test_agrupar_impuestos_diferentes_codigos(self):
+        """Test agrupacion de impuestos de diferentes codigos."""
+        taxes = [
+            Tax.iva_19(100000.0),
+            Tax.ica(0.966, 100000.0),
+        ]
+        agrupados = agrupar_impuestos(taxes)
+
+        assert '01' in agrupados
+        assert '03' in agrupados
+        assert agrupados['01'].total_amount == 19000.0
+        assert agrupados['03'].total_amount == 966.0
+
+    def test_separar_impuestos_retenciones(self):
+        """Test separacion de impuestos regulares y retenciones."""
+        taxes = [
+            Tax.iva_19(100000.0),
+            Tax.rete_fte(11.0, 100000.0),
+            Tax.rete_iva(19000.0),
+        ]
+        impuestos, retenciones = separar_impuestos_retenciones(taxes)
+
+        assert len(impuestos) == 1
+        assert len(retenciones) == 2
+        assert impuestos[0].code == '01'
+        assert all(t.is_withholding for t in retenciones)
+
+
+class TestCalcularTotalesImpuestos:
+    """Tests para calculo de totales de impuestos."""
+
+    def test_calcular_totales_impuestos(self):
+        """Test calculo de totales por codigo."""
+        taxes = [
+            Tax.iva_19(100000.0),
+            Tax.iva_5(50000.0),
+            Tax.ica(0.966, 100000.0),
+        ]
+        totales = calcular_totales_impuestos(taxes)
+
+        assert totales['01'] == 21500.0  # 19000 + 2500
+        assert totales['03'] == 966.0
+
+
+class TestCUFEFlexible:
+    """Tests para calculo de CUFE/CUDE con multiples impuestos."""
+
+    def test_cufe_flexible_formato(self):
+        """Test que CUFE flexible tenga formato correcto."""
+        cufe = calcular_cufe_flexible(
+            numero='SETP990000001',
+            fecha_emision='2024-01-15',
+            hora_emision='10:30:00-05:00',
+            subtotal=100000.0,
+            impuestos={'01': 19000.0, '03': 966.0, '04': 0.0},
+            total=119966.0,
+            nit_emisor='1001186599',
+            nit_adquiriente='222222222222',
+            clave_tecnica='fc8eac422eba16e22ffd8c6f94b3f40a6e38162c',
+            tipo_ambiente='2'
+        )
+        assert len(cufe) == 96
+        assert all(c in '0123456789abcdef' for c in cufe)
+
+    def test_cufe_flexible_compatible_con_legacy(self):
+        """Test que CUFE flexible sea compatible con legacy cuando solo hay IVA."""
+        cufe_legacy = calcular_cufe(
+            numero='SETP990000001',
+            fecha_emision='2024-01-15',
+            hora_emision='10:30:00-05:00',
+            subtotal=100000.0,
+            iva=19000.0,
+            total=119000.0,
+            nit_emisor='1001186599',
+            nit_adquiriente='222222222222',
+            clave_tecnica='fc8eac422eba16e22ffd8c6f94b3f40a6e38162c',
+            tipo_ambiente='2'
+        )
+
+        cufe_flexible = calcular_cufe_flexible(
+            numero='SETP990000001',
+            fecha_emision='2024-01-15',
+            hora_emision='10:30:00-05:00',
+            subtotal=100000.0,
+            impuestos={'01': 19000.0},
+            total=119000.0,
+            nit_emisor='1001186599',
+            nit_adquiriente='222222222222',
+            clave_tecnica='fc8eac422eba16e22ffd8c6f94b3f40a6e38162c',
+            tipo_ambiente='2'
+        )
+
+        assert cufe_legacy == cufe_flexible
+
+    def test_cude_flexible_formato(self):
+        """Test que CUDE flexible tenga formato correcto."""
+        cude = calcular_cude_flexible(
+            numero='SETP990000002',
+            fecha_emision='2024-01-16',
+            hora_emision='11:00:00-05:00',
+            subtotal=100000.0,
+            impuestos={'01': 19000.0, '03': 500.0},
+            total=119500.0,
+            nit_emisor='1001186599',
+            nit_adquiriente='222222222222',
+            software_pin='12345',
+            tipo_ambiente='2'
+        )
+        assert len(cude) == 96
+
+
+class TestInvoiceLineMultipleTaxes:
+    """Tests para lineas de factura con multiples impuestos."""
+
+    def test_invoice_line_legacy_mode(self):
+        """Test que modo legacy funcione (solo tax_percent)."""
+        line = InvoiceLine(
+            description='Producto',
+            quantity=2.0,
+            unit_code='94',
+            unit_price=50000.0,
+            tax_percent=19.0,
+        )
+
+        assert len(line.taxes) == 1
+        assert line.taxes[0].code == '01'
+        assert line.taxes[0].percent == 19.0
+        assert line.get_line_total() == 100000.0
+        assert line.get_taxes_total() == 19000.0
+
+    def test_invoice_line_multiple_taxes(self):
+        """Test linea con multiples impuestos."""
+        line_total = 100000.0
+        line = InvoiceLine(
+            description='Producto',
+            quantity=1.0,
+            unit_code='94',
+            unit_price=100000.0,
+            taxes=[
+                Tax.iva_19(line_total),
+                Tax.ica(0.966, line_total),
+            ]
+        )
+
+        assert len(line.taxes) == 2
+        assert line.get_line_total() == 100000.0
+        assert line.get_taxes_total() == 19966.0  # 19000 + 966
+
+    def test_invoice_line_with_withholdings(self):
+        """Test linea con retenciones."""
+        line_total = 100000.0
+        line = InvoiceLine(
+            description='Servicio',
+            quantity=1.0,
+            unit_code='94',
+            unit_price=100000.0,
+            taxes=[
+                Tax.iva_19(line_total),
+                Tax.rete_fte(11.0, line_total),
+            ]
+        )
+
+        assert line.get_taxes_total() == 19000.0  # Solo IVA
+        assert line.get_withholdings_total() == 11000.0  # ReteFte
+
+    def test_invoice_line_get_iva(self):
+        """Test obtener IVA de la linea."""
+        line = InvoiceLine(
+            description='Producto',
+            quantity=1.0,
+            unit_code='94',
+            unit_price=100000.0,
+            taxes=[
+                Tax.iva_19(100000.0),
+                Tax.ica(0.5, 100000.0),
+            ]
+        )
+
+        iva = line.get_iva()
+        assert iva is not None
+        assert iva.code == '01'
+        assert iva.amount == 19000.0
+
+
+class TestInvoiceBuilderMultipleTaxes:
+    """Tests para InvoiceBuilder con multiples impuestos."""
+
+    def test_invoice_with_multiple_tax_rates(self, sample_config, sample_supplier, sample_customer):
+        """Test factura con IVA 19% y 5%."""
+        lines = [
+            InvoiceLine(
+                description='Producto IVA 19%',
+                quantity=1.0,
+                unit_code='94',
+                unit_price=100000.0,
+                taxes=[Tax.iva_19(100000.0)]
+            ),
+            InvoiceLine(
+                description='Producto IVA 5%',
+                quantity=1.0,
+                unit_code='94',
+                unit_price=50000.0,
+                taxes=[Tax.iva_5(50000.0)]
+            ),
+        ]
+
+        invoice_data = InvoiceData(
+            number='SETP990000010',
+            issue_date='2024-01-15',
+            issue_time='10:30:00-05:00',
+            due_date='2024-02-14',
+            supplier=sample_supplier,
+            customer=sample_customer,
+            lines=lines,
+        )
+
+        builder = InvoiceBuilder(sample_config)
+        xml = builder.build(invoice_data)
+
+        # Debe tener TaxTotal
+        tax_totals = xml.findall('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}TaxTotal')
+        assert len(tax_totals) >= 1
+
+    def test_invoice_with_iva_and_ica(self, sample_config, sample_supplier, sample_customer):
+        """Test factura con IVA e ICA."""
+        line_total = 100000.0
+        lines = [
+            InvoiceLine(
+                description='Producto con IVA e ICA',
+                quantity=1.0,
+                unit_code='94',
+                unit_price=100000.0,
+                taxes=[
+                    Tax.iva_19(line_total),
+                    Tax.ica(0.966, line_total),
+                ]
+            ),
+        ]
+
+        invoice_data = InvoiceData(
+            number='SETP990000011',
+            issue_date='2024-01-15',
+            issue_time='10:30:00-05:00',
+            supplier=sample_supplier,
+            customer=sample_customer,
+            lines=lines,
+        )
+
+        builder = InvoiceBuilder(sample_config)
+        xml = builder.build(invoice_data)
+
+        # Contar TaxTotal a nivel de documento (hijos directos)
+        # Hay 2 a nivel documento (IVA e ICA) + 2 a nivel de linea
+        cac_ns = '{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}'
+        doc_tax_totals = [child for child in xml if child.tag == f'{cac_ns}TaxTotal']
+        assert len(doc_tax_totals) == 2  # Uno para IVA, otro para ICA
+
+    def test_invoice_with_withholdings(self, sample_config, sample_supplier, sample_customer):
+        """Test factura con retenciones."""
+        line_total = 100000.0
+        iva_amount = 19000.0
+        lines = [
+            InvoiceLine(
+                description='Servicio con retenciones',
+                quantity=1.0,
+                unit_code='94',
+                unit_price=100000.0,
+                taxes=[
+                    Tax.iva_19(line_total),
+                    Tax.rete_fte(11.0, line_total),
+                    Tax.rete_iva(iva_amount, 15.0),
+                ]
+            ),
+        ]
+
+        invoice_data = InvoiceData(
+            number='SETP990000012',
+            issue_date='2024-01-15',
+            issue_time='10:30:00-05:00',
+            supplier=sample_supplier,
+            customer=sample_customer,
+            lines=lines,
+        )
+
+        builder = InvoiceBuilder(sample_config)
+        xml = builder.build(invoice_data)
+
+        # Debe tener WithholdingTaxTotal
+        wh_totals = xml.findall('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}WithholdingTaxTotal')
+        assert len(wh_totals) == 2  # ReteFte y ReteIVA
