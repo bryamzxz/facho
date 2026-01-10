@@ -675,7 +675,7 @@ def calcular_cufe(
     tipo_ambiente: str = '2'
 ) -> str:
     """
-    Calcular CUFE segun especificacion DIAN.
+    Calcular CUFE segun especificacion DIAN (version legacy).
 
     Args:
         numero: Numero de factura
@@ -695,6 +695,56 @@ def calcular_cufe(
     cadena = (
         f"{numero}{fecha_emision}{hora_emision}"
         f"{subtotal:.2f}01{iva:.2f}04{0:.2f}03{0:.2f}"
+        f"{total:.2f}{nit_emisor}{nit_adquiriente}"
+        f"{clave_tecnica}{tipo_ambiente}"
+    )
+    return hashlib.sha384(cadena.encode('utf-8')).hexdigest()
+
+
+def calcular_cufe_flexible(
+    numero: str,
+    fecha_emision: str,
+    hora_emision: str,
+    subtotal: float,
+    impuestos: Dict[str, float],
+    total: float,
+    nit_emisor: str,
+    nit_adquiriente: str,
+    clave_tecnica: str,
+    tipo_ambiente: str = '2'
+) -> str:
+    """
+    Calcular CUFE con soporte para multiples impuestos.
+
+    Cadena CUFE segun Anexo Tecnico DIAN:
+    NumDoc + FecDoc + HoraDoc + ValorBruto + 01 + ValorIVA + 04 + ValorINC +
+    03 + ValorICA + ValorTotal + NitEmisor + NumAdquiriente +
+    ClaveTecnica + TipoAmbiente
+
+    Args:
+        numero: Numero de factura
+        fecha_emision: Fecha en formato YYYY-MM-DD
+        hora_emision: Hora en formato HH:MM:SS-05:00
+        subtotal: Valor subtotal
+        impuestos: Diccionario con codigo de impuesto -> monto
+                   Ej: {'01': 19000.0, '03': 966.0, '04': 0.0}
+        total: Valor total
+        nit_emisor: NIT del emisor
+        nit_adquiriente: NIT del adquiriente
+        clave_tecnica: Clave tecnica DIAN
+        tipo_ambiente: '1' produccion, '2' pruebas
+
+    Returns:
+        CUFE en formato SHA-384 hexadecimal
+    """
+    # Obtener valores de impuestos (0 si no existe)
+    iva = impuestos.get('01', 0.0)  # IVA
+    inc = impuestos.get('04', 0.0)  # INC
+    ica = impuestos.get('03', 0.0)  # ICA
+
+    cadena = (
+        f"{numero}{fecha_emision}{hora_emision}"
+        f"{subtotal:.2f}01{iva:.2f}04{inc:.2f}03{ica:.2f}"
         f"{total:.2f}{nit_emisor}{nit_adquiriente}"
         f"{clave_tecnica}{tipo_ambiente}"
     )
@@ -736,7 +786,7 @@ def calcular_cude(
     tipo_ambiente: str = '2'
 ) -> str:
     """
-    Calcular CUDE segun especificacion DIAN.
+    Calcular CUDE segun especificacion DIAN (version legacy).
 
     El CUDE (Codigo Unico de Documento Electronico) se usa para
     notas credito y notas debito.
@@ -762,6 +812,59 @@ def calcular_cude(
     cadena = (
         f"{numero}{fecha_emision}{hora_emision}"
         f"{subtotal:.2f}01{iva:.2f}04{0:.2f}03{0:.2f}"
+        f"{total:.2f}{nit_emisor}{nit_adquiriente}"
+        f"{software_pin}{tipo_ambiente}"
+    )
+    return hashlib.sha384(cadena.encode('utf-8')).hexdigest()
+
+
+def calcular_cude_flexible(
+    numero: str,
+    fecha_emision: str,
+    hora_emision: str,
+    subtotal: float,
+    impuestos: Dict[str, float],
+    total: float,
+    nit_emisor: str,
+    nit_adquiriente: str,
+    software_pin: str,
+    tipo_ambiente: str = '2'
+) -> str:
+    """
+    Calcular CUDE con soporte para multiples impuestos.
+
+    El CUDE (Codigo Unico de Documento Electronico) se usa para
+    notas credito, notas debito y documentos soporte.
+
+    Cadena CUDE segun Anexo Tecnico DIAN:
+    NumDoc + FecDoc + HoraDoc + ValorBruto + 01 + ValorIVA + 04 + ValorINC +
+    03 + ValorICA + ValorTotal + NitEmisor + NumAdquiriente +
+    SoftwarePIN + TipoAmbiente
+
+    Args:
+        numero: Numero del documento
+        fecha_emision: Fecha en formato YYYY-MM-DD
+        hora_emision: Hora en formato HH:MM:SS-05:00
+        subtotal: Valor subtotal
+        impuestos: Diccionario con codigo de impuesto -> monto
+                   Ej: {'01': 19000.0, '03': 966.0, '04': 0.0}
+        total: Valor total
+        nit_emisor: NIT del emisor
+        nit_adquiriente: NIT del adquiriente
+        software_pin: PIN del software DIAN
+        tipo_ambiente: '1' produccion, '2' pruebas
+
+    Returns:
+        CUDE en formato SHA-384 hexadecimal
+    """
+    # Obtener valores de impuestos (0 si no existe)
+    iva = impuestos.get('01', 0.0)  # IVA
+    inc = impuestos.get('04', 0.0)  # INC
+    ica = impuestos.get('03', 0.0)  # ICA
+
+    cadena = (
+        f"{numero}{fecha_emision}{hora_emision}"
+        f"{subtotal:.2f}01{iva:.2f}04{inc:.2f}03{ica:.2f}"
         f"{total:.2f}{nit_emisor}{nit_adquiriente}"
         f"{software_pin}{tipo_ambiente}"
     )

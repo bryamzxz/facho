@@ -30,6 +30,21 @@ from .constants import (
     CREDIT_REASONS,
     DOC_TYPES,
 )
+from .taxes import (
+    Tax,
+    TaxTotal,
+    TAX_CODES as TAX_CODES_FULL,
+    TAX_NAMES,
+    WITHHOLDING_TAX_CODES,
+    IVA_RATES,
+    RETENTION_RATES,
+    truncar,
+    truncar_decimal,
+    formato_dinero,
+    agrupar_impuestos,
+    separar_impuestos_retenciones,
+    calcular_totales_impuestos,
+)
 
 __all__ = [
     # Builders
@@ -44,6 +59,15 @@ __all__ = [
     'Address',
     'CreditNoteData',
     'DebitNoteData',
+    # Tax classes and functions
+    'Tax',
+    'TaxTotal',
+    'truncar',
+    'truncar_decimal',
+    'formato_dinero',
+    'agrupar_impuestos',
+    'separar_impuestos_retenciones',
+    'calcular_totales_impuestos',
     # Constants
     'NS',
     'SCHEME_AGENCY_ATTRS',
@@ -56,6 +80,11 @@ __all__ = [
     'CREDIT_NOTE_TYPE_CODE',
     'DEBIT_NOTE_TYPE_CODE',
     'TAX_CODES',
+    'TAX_CODES_FULL',
+    'TAX_NAMES',
+    'WITHHOLDING_TAX_CODES',
+    'IVA_RATES',
+    'RETENTION_RATES',
     'CREDIT_REASONS',
     'DEBIT_REASONS',
     'DOC_TYPES',

@@ -21,6 +21,16 @@ from .constants import (
     COUNTRY_ID_ATTRS,
     AUTHORIZATION_PROVIDER_ID,
 )
+from .taxes import (
+    Tax,
+    TaxTotal,
+    agrupar_impuestos,
+    separar_impuestos_retenciones,
+    calcular_totales_impuestos,
+    truncar,
+    formato_dinero,
+    WITHHOLDING_TAX_CODES,
+)
 from ..client.dian_simple import calcular_dv
 
 
@@ -59,15 +69,89 @@ class Party:
 
 @dataclass
 class InvoiceLine:
-    """Linea de factura."""
+    """
+    Linea de factura.
+
+    Soporta multiples impuestos por linea. Si no se especifica 'taxes',
+    se usa 'tax_percent' para retrocompatibilidad (IVA por defecto).
+
+    Attributes:
+        description: Descripcion del producto/servicio
+        quantity: Cantidad
+        unit_code: Codigo de unidad (ej: '94' para unidad)
+        unit_price: Precio unitario
+        tax_percent: Porcentaje IVA (legacy, usar 'taxes' para flexibilidad)
+        taxes: Lista de impuestos aplicables a la linea
+        item_id: Identificador del producto
+        item_scheme_id: Esquema de identificacion
+        item_scheme_name: Nombre del esquema
+
+    Example:
+        # Forma legacy (solo IVA)
+        InvoiceLine(
+            description='Producto',
+            quantity=1,
+            unit_code='94',
+            unit_price=100000,
+            tax_percent=19.0
+        )
+
+        # Forma flexible (multiples impuestos)
+        line_total = 1 * 100000
+        InvoiceLine(
+            description='Producto',
+            quantity=1,
+            unit_code='94',
+            unit_price=100000,
+            taxes=[
+                Tax.iva_19(line_total),
+                Tax.ica(0.966, line_total)
+            ]
+        )
+    """
     description: str
     quantity: float
     unit_code: str
     unit_price: float
-    tax_percent: float = 19.0
+    tax_percent: float = 19.0  # Legacy: porcentaje IVA
+    taxes: List[Tax] = None    # Flexible: lista de impuestos
     item_id: str = ''
     item_scheme_id: str = '999'
     item_scheme_name: str = 'Estandar de adopcion del contribuyente'
+
+    def __post_init__(self):
+        """Inicializar impuestos si no se proporcionaron."""
+        if self.taxes is None:
+            # Modo legacy: crear Tax de IVA basado en tax_percent
+            line_total = self.quantity * self.unit_price
+            self.taxes = [Tax.iva(self.tax_percent, line_total)]
+
+    def get_line_total(self) -> float:
+        """Obtener total de la linea (cantidad * precio)."""
+        return truncar(self.quantity * self.unit_price)
+
+    def get_taxes_total(self) -> float:
+        """Obtener suma de todos los impuestos (excluyendo retenciones)."""
+        return truncar(sum(
+            t.amount for t in self.taxes if not t.is_withholding
+        ))
+
+    def get_withholdings_total(self) -> float:
+        """Obtener suma de todas las retenciones."""
+        return truncar(sum(
+            t.amount for t in self.taxes if t.is_withholding
+        ))
+
+    def get_tax_by_code(self, code: str) -> Optional[Tax]:
+        """Obtener impuesto por codigo."""
+        for tax in self.taxes:
+            if tax.code == code:
+                return tax
+        return None
+
+    def get_iva(self) -> Optional[Tax]:
+        """Obtener impuesto IVA si existe."""
+        return self.get_tax_by_code('01')
 
 
 @dataclass
@@ -138,26 +222,47 @@ class InvoiceBuilder:
         Returns:
             Elemento XML de la factura
         """
-        # Calcular totales
-        subtotal = sum(
-            line.quantity * line.unit_price
+        # Calcular subtotal
+        subtotal = truncar(sum(
+            line.get_line_total()
             for line in invoice_data.lines
-        )
-        tax_iva = sum(
-            line.quantity * line.unit_price * (line.tax_percent / 100)
-            for line in invoice_data.lines
-        )
-        total = subtotal + tax_iva
+        ))
+
+        # Recolectar todos los impuestos de todas las lineas
+        all_taxes: List[Tax] = []
+        for line in invoice_data.lines:
+            all_taxes.extend(line.taxes)
+
+        # Separar impuestos regulares de retenciones
+        impuestos, retenciones = separar_impuestos_retenciones(all_taxes)
+
+        # Calcular totales por tipo de impuesto
+        totales_impuestos = calcular_totales_impuestos(impuestos)
+        totales_retenciones = calcular_totales_impuestos(retenciones)
+
+        # Total de impuestos (sin retenciones)
+        total_impuestos = truncar(sum(totales_impuestos.values()))
+
+        # Total de retenciones
+        total_retenciones = truncar(sum(totales_retenciones.values()))
+
+        # IVA especifico para CUFE
+        tax_iva = totales_impuestos.get('01', 0.0)
+        tax_inc = totales_impuestos.get('04', 0.0)
+        tax_ica = totales_impuestos.get('03', 0.0)
+
+        # Total factura = subtotal + impuestos - retenciones
+        total = truncar(subtotal + total_impuestos)
 
         # Calcular CUFE y SoftwareSecurityCode
-        from ..client.dian_simple import calcular_cufe, calcular_software_security_code
+        from ..client.dian_simple import calcular_cufe_flexible, calcular_software_security_code
 
-        cufe = calcular_cufe(
+        cufe = calcular_cufe_flexible(
             numero=invoice_data.number,
             fecha_emision=invoice_data.issue_date,
             hora_emision=invoice_data.issue_time,
             subtotal=subtotal,
-            iva=tax_iva,
+            impuestos=totales_impuestos,
             total=total,
             nit_emisor=self.config.nit,
             nit_adquiriente=invoice_data.customer.nit,
@@ -171,13 +276,20 @@ class InvoiceBuilder:
             invoice_data.number
         )
 
+        # Agrupar impuestos para XML
+        impuestos_agrupados = agrupar_impuestos(impuestos)
+        retenciones_agrupadas = agrupar_impuestos(retenciones)
+
         # Construir XML
         return self._build_invoice_xml(
             invoice_data=invoice_data,
             cufe=cufe,
             software_security_code=software_security_code,
             subtotal=subtotal,
-            tax_iva=tax_iva,
+            impuestos_agrupados=impuestos_agrupados,
+            retenciones_agrupadas=retenciones_agrupadas,
+            total_impuestos=total_impuestos,
+            total_retenciones=total_retenciones,
             total=total
         )
 
@@ -187,7 +299,10 @@ class InvoiceBuilder:
         cufe: str,
         software_security_code: str,
         subtotal: float,
-        tax_iva: float,
+        impuestos_agrupados: Dict[str, TaxTotal],
+        retenciones_agrupadas: Dict[str, TaxTotal],
+        total_impuestos: float,
+        total_retenciones: float,
         total: float
     ) -> etree._Element:
         """Construir estructura XML de factura."""
@@ -220,11 +335,15 @@ class InvoiceBuilder:
         # Medios de pago
         self._add_payment_means(invoice, invoice_data)
 
-        # Impuestos totales
-        self._add_tax_total(invoice, subtotal, tax_iva)
+        # Impuestos totales (TaxTotal para cada tipo de impuesto)
+        self._add_tax_totals(invoice, impuestos_agrupados)
+
+        # Retenciones (WithholdingTaxTotal)
+        if retenciones_agrupadas:
+            self._add_withholding_tax_totals(invoice, retenciones_agrupadas)
 
         # Totales monetarios
-        self._add_monetary_total(invoice, subtotal, tax_iva, total)
+        self._add_monetary_total(invoice, subtotal, total_impuestos, total)
 
         # Lineas de factura
         self._add_invoice_lines(invoice, invoice_data.lines)
@@ -509,31 +628,141 @@ class InvoiceBuilder:
             payment, '{%s}PaymentDueDate' % NS['cbc']
         ).text = invoice_data.due_date or invoice_data.issue_date
 
+    def _add_tax_totals(
+        self,
+        invoice: etree._Element,
+        impuestos_agrupados: Dict[str, TaxTotal],
+        currency: str = 'COP'
+    ):
+        """
+        Agregar TaxTotal para cada tipo de impuesto.
+
+        Genera un elemento TaxTotal por cada codigo de impuesto diferente,
+        con TaxSubtotal para cada tasa diferente.
+
+        Args:
+            invoice: Elemento XML padre
+            impuestos_agrupados: Diccionario de impuestos agrupados por codigo
+            currency: Moneda (default COP)
+        """
+        for codigo, tax_total in impuestos_agrupados.items():
+            tax_total_el = etree.SubElement(invoice, '{%s}TaxTotal' % NS['cac'])
+
+            # TaxAmount total
+            tax_amt = etree.SubElement(tax_total_el, '{%s}TaxAmount' % NS['cbc'])
+            tax_amt.set('currencyID', currency)
+            tax_amt.text = formato_dinero(tax_total.total_amount)
+
+            # RoundingAmount
+            rounding = etree.SubElement(tax_total_el, '{%s}RoundingAmount' % NS['cbc'])
+            rounding.set('currencyID', currency)
+            rounding.text = '0.00'
+
+            # Agrupar subtotales por porcentaje
+            subtotales_por_tasa: Dict[float, Dict] = {}
+            for tax in tax_total.subtotals:
+                tasa = tax.percent
+                if tasa not in subtotales_por_tasa:
+                    subtotales_por_tasa[tasa] = {
+                        'taxable_amount': 0.0,
+                        'tax_amount': 0.0,
+                        'name': tax.name,
+                        'code': tax.code,
+                    }
+                subtotales_por_tasa[tasa]['taxable_amount'] += tax.taxable_amount
+                subtotales_por_tasa[tasa]['tax_amount'] += tax.amount
+
+            # Crear TaxSubtotal por cada tasa
+            for tasa, datos in subtotales_por_tasa.items():
+                tax_sub = etree.SubElement(tax_total_el, '{%s}TaxSubtotal' % NS['cac'])
+
+                taxable = etree.SubElement(tax_sub, '{%s}TaxableAmount' % NS['cbc'])
+                taxable.set('currencyID', currency)
+                taxable.text = formato_dinero(datos['taxable_amount'])
+
+                tax_amt2 = etree.SubElement(tax_sub, '{%s}TaxAmount' % NS['cbc'])
+                tax_amt2.set('currencyID', currency)
+                tax_amt2.text = formato_dinero(datos['tax_amount'])
+
+                tax_cat = etree.SubElement(tax_sub, '{%s}TaxCategory' % NS['cac'])
+                etree.SubElement(
+                    tax_cat, '{%s}Percent' % NS['cbc']
+                ).text = formato_dinero(tasa)
+
+                tax_sch = etree.SubElement(tax_cat, '{%s}TaxScheme' % NS['cac'])
+                etree.SubElement(tax_sch, '{%s}ID' % NS['cbc']).text = datos['code']
+                etree.SubElement(tax_sch, '{%s}Name' % NS['cbc']).text = datos['name']
+
+    def _add_withholding_tax_totals(
+        self,
+        invoice: etree._Element,
+        retenciones_agrupadas: Dict[str, TaxTotal],
+        currency: str = 'COP'
+    ):
+        """
+        Agregar WithholdingTaxTotal para retenciones.
+
+        Args:
+            invoice: Elemento XML padre
+            retenciones_agrupadas: Diccionario de retenciones agrupadas por codigo
+            currency: Moneda (default COP)
+        """
+        for codigo, tax_total in retenciones_agrupadas.items():
+            wh_total_el = etree.SubElement(invoice, '{%s}WithholdingTaxTotal' % NS['cac'])
+
+            # TaxAmount total
+            tax_amt = etree.SubElement(wh_total_el, '{%s}TaxAmount' % NS['cbc'])
+            tax_amt.set('currencyID', currency)
+            tax_amt.text = formato_dinero(tax_total.total_amount)
+
+            # Agrupar subtotales por porcentaje
+            subtotales_por_tasa: Dict[float, Dict] = {}
+            for tax in tax_total.subtotals:
+                tasa = tax.percent
+                if tasa not in subtotales_por_tasa:
+                    subtotales_por_tasa[tasa] = {
+                        'taxable_amount': 0.0,
+                        'tax_amount': 0.0,
+                        'name': tax.name,
+                        'code': tax.code,
+                    }
+                subtotales_por_tasa[tasa]['taxable_amount'] += tax.taxable_amount
+                subtotales_por_tasa[tasa]['tax_amount'] += tax.amount
+
+            # Crear TaxSubtotal por cada tasa
+            for tasa, datos in subtotales_por_tasa.items():
+                tax_sub = etree.SubElement(wh_total_el, '{%s}TaxSubtotal' % NS['cac'])
+
+                taxable = etree.SubElement(tax_sub, '{%s}TaxableAmount' % NS['cbc'])
+                taxable.set('currencyID', currency)
+                taxable.text = formato_dinero(datos['taxable_amount'])
+
+                tax_amt2 = etree.SubElement(tax_sub, '{%s}TaxAmount' % NS['cbc'])
+                tax_amt2.set('currencyID', currency)
+                tax_amt2.text = formato_dinero(datos['tax_amount'])
+
+                tax_cat = etree.SubElement(tax_sub, '{%s}TaxCategory' % NS['cac'])
+                etree.SubElement(
+                    tax_cat, '{%s}Percent' % NS['cbc']
+                ).text = formato_dinero(tasa)
+
+                tax_sch = etree.SubElement(tax_cat, '{%s}TaxScheme' % NS['cac'])
+                etree.SubElement(tax_sch, '{%s}ID' % NS['cbc']).text = datos['code']
+                etree.SubElement(tax_sch, '{%s}Name' % NS['cbc']).text = datos['name']
+
+    # Metodo legacy para retrocompatibilidad
     def _add_tax_total(self, invoice: etree._Element, subtotal: float, tax_iva: float):
-        """Agregar totales de impuestos."""
-        tax_total = etree.SubElement(invoice, '{%s}TaxTotal' % NS['cac'])
-        tax_amt = etree.SubElement(tax_total, '{%s}TaxAmount' % NS['cbc'])
-        tax_amt.set('currencyID', 'COP')
-        tax_amt.text = f"{tax_iva:.2f}"
-
-        rounding = etree.SubElement(tax_total, '{%s}RoundingAmount' % NS['cbc'])
-        rounding.set('currencyID', 'COP')
-        rounding.text = '0.00'
-
-        tax_sub = etree.SubElement(tax_total, '{%s}TaxSubtotal' % NS['cac'])
-        taxable = etree.SubElement(tax_sub, '{%s}TaxableAmount' % NS['cbc'])
-        taxable.set('currencyID', 'COP')
-        taxable.text = f"{subtotal:.2f}"
-
-        tax_amt2 = etree.SubElement(tax_sub, '{%s}TaxAmount' % NS['cbc'])
-        tax_amt2.set('currencyID', 'COP')
-        tax_amt2.text = f"{tax_iva:.2f}"
-
-        tax_cat = etree.SubElement(tax_sub, '{%s}TaxCategory' % NS['cac'])
-        etree.SubElement(tax_cat, '{%s}Percent' % NS['cbc']).text = '19.00'
-        tax_sch = etree.SubElement(tax_cat, '{%s}TaxScheme' % NS['cac'])
-        etree.SubElement(tax_sch, '{%s}ID' % NS['cbc']).text = '01'
-        etree.SubElement(tax_sch, '{%s}Name' % NS['cbc']).text = 'IVA'
+        """Agregar totales de impuestos (metodo legacy)."""
+        impuestos_agrupados = {
+            '01': TaxTotal(
+                code='01',
+                name='IVA',
+                total_amount=tax_iva,
+                total_taxable_amount=subtotal,
+                subtotals=[Tax.iva(19.0, subtotal)]
+            )
+        }
+        self._add_tax_totals(invoice, impuestos_agrupados)
 
     def _add_monetary_total(
         self,
@@ -558,47 +787,41 @@ class InvoiceBuilder:
             el.set('currencyID', 'COP')
             el.text = f"{value:.2f}"
 
-    def _add_invoice_lines(self, invoice: etree._Element, lines: List[InvoiceLine]):
-        """Agregar lineas de factura."""
+    def _add_invoice_lines(
+        self,
+        invoice: etree._Element,
+        lines: List[InvoiceLine],
+        currency: str = 'COP'
+    ):
+        """
+        Agregar lineas de factura con soporte para multiples impuestos.
+
+        Args:
+            invoice: Elemento XML padre
+            lines: Lista de lineas de factura
+            currency: Moneda (default COP)
+        """
         for idx, line_data in enumerate(lines, 1):
-            line_total = line_data.quantity * line_data.unit_price
-            line_tax = line_total * (line_data.tax_percent / 100)
+            line_total = line_data.get_line_total()
 
             line = etree.SubElement(invoice, '{%s}InvoiceLine' % NS['cac'])
             etree.SubElement(line, '{%s}ID' % NS['cbc']).text = str(idx)
 
             qty = etree.SubElement(line, '{%s}InvoicedQuantity' % NS['cbc'])
             qty.set('unitCode', line_data.unit_code)
-            qty.text = f'{line_data.quantity:.2f}'
+            qty.text = formato_dinero(line_data.quantity)
 
             line_ext = etree.SubElement(line, '{%s}LineExtensionAmount' % NS['cbc'])
-            line_ext.set('currencyID', 'COP')
-            line_ext.text = f"{line_total:.2f}"
+            line_ext.set('currencyID', currency)
+            line_ext.text = formato_dinero(line_total)
 
-            # TaxTotal de linea
-            line_tax_el = etree.SubElement(line, '{%s}TaxTotal' % NS['cac'])
-            line_tax_amt = etree.SubElement(line_tax_el, '{%s}TaxAmount' % NS['cbc'])
-            line_tax_amt.set('currencyID', 'COP')
-            line_tax_amt.text = f"{line_tax:.2f}"
+            # Separar impuestos regulares de retenciones
+            impuestos, retenciones = separar_impuestos_retenciones(line_data.taxes)
 
-            line_round = etree.SubElement(line_tax_el, '{%s}RoundingAmount' % NS['cbc'])
-            line_round.set('currencyID', 'COP')
-            line_round.text = '0.00'
-
-            line_tax_sub = etree.SubElement(line_tax_el, '{%s}TaxSubtotal' % NS['cac'])
-            line_taxable = etree.SubElement(line_tax_sub, '{%s}TaxableAmount' % NS['cbc'])
-            line_taxable.set('currencyID', 'COP')
-            line_taxable.text = f"{line_total:.2f}"
-
-            line_tax_amt2 = etree.SubElement(line_tax_sub, '{%s}TaxAmount' % NS['cbc'])
-            line_tax_amt2.set('currencyID', 'COP')
-            line_tax_amt2.text = f"{line_tax:.2f}"
-
-            line_tax_cat = etree.SubElement(line_tax_sub, '{%s}TaxCategory' % NS['cac'])
-            etree.SubElement(line_tax_cat, '{%s}Percent' % NS['cbc']).text = f'{line_data.tax_percent:.2f}'
-            line_tax_sch = etree.SubElement(line_tax_cat, '{%s}TaxScheme' % NS['cac'])
-            etree.SubElement(line_tax_sch, '{%s}ID' % NS['cbc']).text = '01'
-            etree.SubElement(line_tax_sch, '{%s}Name' % NS['cbc']).text = 'IVA'
+            # TaxTotal por cada tipo de impuesto en la linea
+            impuestos_agrupados = agrupar_impuestos(impuestos)
+            for codigo, tax_total in impuestos_agrupados.items():
+                self._add_line_tax_total(line, tax_total, currency)
 
             # Item
             item = etree.SubElement(line, '{%s}Item' % NS['cac'])
@@ -618,6 +841,64 @@ class InvoiceBuilder:
             # Price
             price = etree.SubElement(line, '{%s}Price' % NS['cac'])
             price_amt = etree.SubElement(price, '{%s}PriceAmount' % NS['cbc'])
-            price_amt.set('currencyID', 'COP')
-            price_amt.text = f"{line_data.unit_price:.2f}"
+            price_amt.set('currencyID', currency)
+            price_amt.text = formato_dinero(line_data.unit_price)
             etree.SubElement(price, '{%s}BaseQuantity' % NS['cbc']).text = '1.00'
+
+    def _add_line_tax_total(
+        self,
+        line: etree._Element,
+        tax_total: TaxTotal,
+        currency: str = 'COP'
+    ):
+        """
+        Agregar TaxTotal a una linea de factura.
+
+        Args:
+            line: Elemento XML de la linea
+            tax_total: Total del impuesto a agregar
+            currency: Moneda
+        """
+        line_tax_el = etree.SubElement(line, '{%s}TaxTotal' % NS['cac'])
+
+        line_tax_amt = etree.SubElement(line_tax_el, '{%s}TaxAmount' % NS['cbc'])
+        line_tax_amt.set('currencyID', currency)
+        line_tax_amt.text = formato_dinero(tax_total.total_amount)
+
+        line_round = etree.SubElement(line_tax_el, '{%s}RoundingAmount' % NS['cbc'])
+        line_round.set('currencyID', currency)
+        line_round.text = '0.00'
+
+        # Agrupar por porcentaje
+        subtotales_por_tasa: Dict[float, Dict] = {}
+        for tax in tax_total.subtotals:
+            tasa = tax.percent
+            if tasa not in subtotales_por_tasa:
+                subtotales_por_tasa[tasa] = {
+                    'taxable_amount': 0.0,
+                    'tax_amount': 0.0,
+                    'name': tax.name,
+                    'code': tax.code,
+                }
+            subtotales_por_tasa[tasa]['taxable_amount'] += tax.taxable_amount
+            subtotales_por_tasa[tasa]['tax_amount'] += tax.amount
+
+        for tasa, datos in subtotales_por_tasa.items():
+            line_tax_sub = etree.SubElement(line_tax_el, '{%s}TaxSubtotal' % NS['cac'])
+
+            line_taxable = etree.SubElement(line_tax_sub, '{%s}TaxableAmount' % NS['cbc'])
+            line_taxable.set('currencyID', currency)
+            line_taxable.text = formato_dinero(datos['taxable_amount'])
+
+            line_tax_amt2 = etree.SubElement(line_tax_sub, '{%s}TaxAmount' % NS['cbc'])
+            line_tax_amt2.set('currencyID', currency)
+            line_tax_amt2.text = formato_dinero(datos['tax_amount'])
+
+            line_tax_cat = etree.SubElement(line_tax_sub, '{%s}TaxCategory' % NS['cac'])
+            etree.SubElement(
+                line_tax_cat, '{%s}Percent' % NS['cbc']
+            ).text = formato_dinero(tasa)
+
+            line_tax_sch = etree.SubElement(line_tax_cat, '{%s}TaxScheme' % NS['cac'])
+            etree.SubElement(line_tax_sch, '{%s}ID' % NS['cbc']).text = datos['code']
+            etree.SubElement(line_tax_sch, '{%s}Name' % NS['cbc']).text = datos['name']
