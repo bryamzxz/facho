@@ -15,7 +15,7 @@ Types of Contributions
 Report Bugs
 ~~~~~~~~~~~
 
-Report bugs at https://lib.facho.cyou
+Report bugs at https://github.com/bryamzxz/facho/issues
 
 If you are reporting a bug, please include:
 
@@ -26,13 +26,13 @@ If you are reporting a bug, please include:
 Fix Bugs
 ~~~~~~~~
 
-Look through the Disroot issues for bugs. Anything tagged with "bug" and "help
+Look through the GitHub issues for bugs. Anything tagged with "bug" and "help
 wanted" is open to whoever wants to implement it.
 
 Implement Features
 ~~~~~~~~~~~~~~~~~~
 
-Look through the Disroot issues for features. Anything tagged with "enhancement"
+Look through the GitHub issues for features. Anything tagged with "enhancement"
 and "help wanted" is open to whoever wants to implement it.
 
 Write Documentation
@@ -45,7 +45,7 @@ articles, and such.
 Submit Feedback
 ~~~~~~~~~~~~~~~
 
-The best way to send feedback is to file an issue at https://lib.facho.cyou/ticket.
+The best way to send feedback is to file an issue at https://github.com/bryamzxz/facho/issues.
 
 If you are proposing a feature:
 
@@ -66,14 +66,14 @@ Using docker
 3. make -f Makefile.dev tox
 
 From Source Code
------------
+----------------
 
 Ready to contribute? Here's how to set up `facho` for local development.
 
-1. Fork the `facho` repo .
+1. Fork the `facho` repo on GitHub.
 2. Clone your fork locally::
 
-    $ fossil clone https://lib.facho.cyou
+    $ git clone https://github.com/bryamzxz/facho.git
 
 3. Install your local copy into a virtualenv. Assuming you have virtualenvwrapper installed, this is how you set up your fork for local development::
 
@@ -114,8 +114,8 @@ Before you submit a pull request, check that it meets these guidelines:
 2. If the pull request adds functionality, the docs should be updated. Put
    your new functionality into a function with a docstring, and add the
    feature to the list in README.rst.
-3. The pull request should work for Python 2.7, 3.4, 3.5 and 3.6, and for PyPy. Check
-   https://travis-ci.org/bit4bit/facho/pull_requests
+3. The pull request should work for Python 3.9, 3.10, 3.11 and 3.12. Check
+   https://github.com/bryamzxz/facho/actions
    and make sure that the tests pass for all supported Python versions.
 
 Tips
@@ -137,14 +137,14 @@ $ bumpversion patch # possible: major / minor / patch
 $ git push
 $ git push --tags
 
-Travis will then deploy to PyPI if tests pass.
+GitHub Actions will then deploy to PyPI if tests pass.
 
 
 DIAN
 ----
 
-El archivo **docs/DIAN/Anexo_Tecnico_Factura_Electronica_Vr1_7_2020.pdf** describe la facturación.
+El archivo **docs/DIAN/Anexo_Tecnico_Factura_Electronica_Vr1_7_2020.pdf** describe la facturacion.
 
-La libreria **facho/facho.py** permite crear elementos xml usando XPath-Like con el proposito de facilitar la relación entre el anexo y la implementación.
-  * facho/form.py: generación de Invoice XML.
+La libreria **facho/facho.py** permite crear elementos xml usando XPath-Like con el proposito de facilitar la relacion entre el anexo y la implementacion.
+  * facho/form.py: generacion de Invoice XML.
   * facho/fe.py: extensiones XML, ejemplo CUFE, Firma, etc..

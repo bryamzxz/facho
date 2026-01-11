@@ -66,11 +66,11 @@ Instalacion
 
 Usando pip desde GitHub::
 
-    pip install git+https://github.com/bit4bit/facho
+    pip install git+https://github.com/bryamzxz/facho
 
 Desde codigo fuente::
 
-    git clone https://github.com/bit4bit/facho
+    git clone https://github.com/bryamzxz/facho
     cd facho
     pip install -e .
 
