@@ -110,3 +110,80 @@ DOC_TYPES = {
         'customization_id': CUSTOMIZATION_ID_DEBIT_NOTE,
     },
 }
+
+# =============================================================================
+# TIPOS DE DOCUMENTO ADICIONALES
+# =============================================================================
+
+# Codigos de tipo de documento adicionales
+EXPORT_INVOICE_TYPE_CODE = '02'
+POS_INVOICE_TYPE_CODE = '03'
+CONTINGENCY_INVOICE_TYPE_CODE = '04'
+SUPPORT_DOCUMENT_TYPE_CODE = '05'
+
+# ProfileIDs adicionales
+DIAN_PROFILE_ID_EXPORT = 'DIAN 2.1: Factura Electronica de Exportacion'
+DIAN_PROFILE_ID_CONTINGENCY = 'DIAN 2.1: Factura Electronica de Contingencia'
+DIAN_PROFILE_ID_SUPPORT = (
+    'DIAN 2.1: documento soporte en adquisiciones efectuadas '
+    'a no obligados a facturar'
+)
+
+# CustomizationIDs adicionales
+CUSTOMIZATION_ID_EXPORT = '02'
+CUSTOMIZATION_ID_CONTINGENCY = '04'
+CUSTOMIZATION_ID_SUPPORT = '05'
+
+# =============================================================================
+# INCOTERMS Y MONEDAS
+# =============================================================================
+
+# Incoterms para factura de exportacion
+INCOTERMS = {
+    'EXW': 'Ex Works',
+    'FCA': 'Free Carrier',
+    'FAS': 'Free Alongside Ship',
+    'FOB': 'Free On Board',
+    'CFR': 'Cost and Freight',
+    'CIF': 'Cost, Insurance and Freight',
+    'CPT': 'Carriage Paid To',
+    'CIP': 'Carriage and Insurance Paid To',
+    'DAP': 'Delivered at Place',
+    'DPU': 'Delivered at Place Unloaded',
+    'DDP': 'Delivered Duty Paid',
+}
+
+# Monedas soportadas
+CURRENCIES = {
+    'COP': 'Peso Colombiano',
+    'USD': 'Dolar Estadounidense',
+    'EUR': 'Euro',
+    'GBP': 'Libra Esterlina',
+    'JPY': 'Yen Japones',
+    'CHF': 'Franco Suizo',
+    'CAD': 'Dolar Canadiense',
+    'MXN': 'Peso Mexicano',
+    'BRL': 'Real Brasileno',
+}
+
+# =============================================================================
+# CODIGOS DE RAZON PARA DESCUENTOS Y CARGOS
+# =============================================================================
+
+# Codigos de razon de descuento DIAN
+ALLOWANCE_REASON_CODES = {
+    '00': 'Descuento no especificado',
+    '01': 'Descuento por pronto pago',
+    '02': 'Descuento por volumen',
+    '03': 'Descuento especial',
+    '04': 'Descuento comercial',
+}
+
+# Codigos de razon de cargo DIAN
+CHARGE_REASON_CODES = {
+    '00': 'Cargo no especificado',
+    '01': 'Flete',
+    '02': 'Empaque',
+    '03': 'Seguros',
+    '04': 'Otros cargos',
+}
