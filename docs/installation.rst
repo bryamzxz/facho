@@ -22,14 +22,14 @@ Instalacion Rapida
 
 Usando pip desde GitHub::
 
-    pip install git+https://github.com/bit4bit/facho
+    pip install git+https://github.com/bryamzxz/facho
 
 Instalacion desde Codigo Fuente
 -------------------------------
 
 Clonar el repositorio::
 
-    git clone https://github.com/bit4bit/facho
+    git clone https://github.com/bryamzxz/facho
     cd facho
 
 Crear entorno virtual (recomendado)::
@@ -119,7 +119,7 @@ Actualizacion
 
 Para actualizar a la ultima version::
 
-    pip install --upgrade git+https://github.com/bit4bit/facho
+    pip install --upgrade git+https://github.com/bryamzxz/facho
 
 Desinstalacion
 --------------
@@ -133,4 +133,4 @@ Enlaces
 
 .. _pip: https://pip.pypa.io
 .. _Python installation guide: http://docs.python-guide.org/en/latest/starting/installation/
-.. _Github repo: https://github.com/bit4bit/facho
+.. _Github repo: https://github.com/bryamzxz/facho

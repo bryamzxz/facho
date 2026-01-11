@@ -36,7 +36,7 @@ Inicio Rapido
 
 Instalacion::
 
-    pip install git+https://github.com/bit4bit/facho
+    pip install git+https://github.com/bryamzxz/facho
 
 Ejemplo basico::
 
@@ -96,6 +96,6 @@ Documentacion Adicional
 Enlaces
 =======
 
-* `Repositorio GitHub <https://github.com/bit4bit/facho>`_
+* `Repositorio GitHub <https://github.com/bryamzxz/facho>`_
 * `Anexo Tecnico v1.9 DIAN <https://www.dian.gov.co/impuestos/factura-electronica/>`_
 * `Portal Factura Electronica DIAN <https://www.dian.gov.co/impuestos/factura-electronica/>`_

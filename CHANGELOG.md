@@ -73,5 +73,5 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## Enlaces
 
-- [Repositorio](https://github.com/bit4bit/facho)
+- [Repositorio](https://github.com/bryamzxz/facho)
 - [Anexo Tecnico v1.9 DIAN](https://www.dian.gov.co/impuestos/factura-electronica/)
