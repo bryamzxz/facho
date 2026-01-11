@@ -2,6 +2,18 @@
 History
 =======
 
+0.3.0 (2025)
+------------
+
+* Libreria Facho completa con todos los tipos de documento DIAN
+* Soporte para Factura de Exportacion (tipo 02)
+* Soporte para Factura por Contingencia (tipo 03)
+* Documento Soporte y NC de Documento Soporte
+* Sistema de impuestos flexible con 26+ codigos de tributos
+* Refactorizacion a arquitectura modular (dian_fe)
+* Limpieza de codigo legacy
+* Actualizacion de documentacion
+
 0.2.0 (2024)
 ------------
 

@@ -2,12 +2,17 @@
 Credits
 =======
 
-Development Lead
-----------------
+Autor Original
+--------------
 
 * Jovany Leandro G.C <bit4bit@riseup.net>
 
-Contributors
-------------
+Mantenedor Actual
+-----------------
 
-None yet. Why not be the first?
+* bryamzxz - https://github.com/bryamzxz
+
+Contribuidores
+--------------
+
+Contribuciones son bienvenidas. Ver CONTRIBUTING.rst para mas informacion.

@@ -59,12 +59,8 @@ Contenido
    :maxdepth: 2
    :caption: Documentacion:
 
-   readme
    installation
    usage
-   contributing
-   authors
-   history
 
 .. toctree::
    :maxdepth: 2
