@@ -333,3 +333,434 @@ def validate_before_build(
     errors = validator.validate(data, config)
     if errors:
         raise ValidationError(f"Datos de {doc_type} invalidos", errors=errors)
+
+
+# =============================================================================
+# VALIDACIONES DE PRODUCCION
+# =============================================================================
+
+def validate_resolution_dates(
+    start_date: str,
+    end_date: str,
+    issue_date: str,
+    field_name: str = "Resolucion"
+) -> List[str]:
+    """
+    Validar que la fecha de emision este dentro del periodo de resolucion.
+
+    Args:
+        start_date: Fecha inicio de resolucion (YYYY-MM-DD)
+        end_date: Fecha fin de resolucion (YYYY-MM-DD)
+        issue_date: Fecha de emision del documento (YYYY-MM-DD)
+        field_name: Nombre del campo para mensajes de error
+
+    Returns:
+        Lista de errores (vacia si todo esta correcto)
+    """
+    errors = []
+
+    try:
+        start = datetime.strptime(start_date, '%Y-%m-%d')
+        end = datetime.strptime(end_date, '%Y-%m-%d')
+        issue = datetime.strptime(issue_date, '%Y-%m-%d')
+
+        if issue < start:
+            errors.append(
+                f"Fecha emision {issue_date} anterior a inicio de "
+                f"{field_name.lower()} {start_date}"
+            )
+        if issue > end:
+            errors.append(
+                f"Fecha emision {issue_date} posterior a fin de "
+                f"{field_name.lower()} {end_date}"
+            )
+
+    except ValueError as e:
+        errors.append(f"Error en formato de fechas: {e}")
+
+    return errors
+
+
+# Patron para validar CUFE/CUDE (96 caracteres hexadecimales)
+CUFE_PATTERN = re.compile(r'^[0-9a-f]{96}$', re.IGNORECASE)
+
+
+def validate_cufe_format(cufe: str, field_name: str = "CUFE") -> List[str]:
+    """
+    Validar formato de CUFE/CUDE (96 caracteres hexadecimales).
+
+    Args:
+        cufe: Codigo CUFE o CUDE a validar
+        field_name: Nombre del campo para mensajes de error
+
+    Returns:
+        Lista de errores (vacia si el formato es correcto)
+    """
+    errors = []
+
+    if not cufe:
+        errors.append(f"{field_name} es requerido")
+        return errors
+
+    if len(cufe) != 96:
+        errors.append(
+            f"{field_name} debe tener 96 caracteres (tiene {len(cufe)})"
+        )
+
+    if not CUFE_PATTERN.match(cufe):
+        errors.append(f"{field_name} debe ser hexadecimal")
+
+    return errors
+
+
+def validate_consecutive_in_range(
+    consecutive: int,
+    range_from: int,
+    range_to: int,
+    prefix: str = ""
+) -> List[str]:
+    """
+    Validar que el consecutivo este dentro del rango autorizado.
+
+    Args:
+        consecutive: Numero consecutivo actual
+        range_from: Inicio del rango autorizado
+        range_to: Fin del rango autorizado
+        prefix: Prefijo del documento (opcional)
+
+    Returns:
+        Lista de errores (vacia si esta en rango)
+    """
+    errors = []
+
+    if consecutive < range_from:
+        errors.append(
+            f"Consecutivo {prefix}{consecutive} menor que "
+            f"rango minimo ({range_from})"
+        )
+
+    if consecutive > range_to:
+        errors.append(
+            f"Consecutivo {prefix}{consecutive} mayor que "
+            f"rango maximo ({range_to})"
+        )
+
+    return errors
+
+
+def validate_totals(
+    line_extension: float,
+    tax_exclusive: float,
+    tax_inclusive: float,
+    tax_amount: float,
+    payable_amount: float,
+    tolerance: float = 2.0
+) -> List[str]:
+    """
+    Validar que los totales cuadren (DIAN permite tolerancia de ±2.00).
+
+    Args:
+        line_extension: Suma de subtotales de lineas
+        tax_exclusive: Total sin impuestos
+        tax_inclusive: Total con impuestos
+        tax_amount: Suma de impuestos
+        payable_amount: Total a pagar
+        tolerance: Tolerancia permitida (default: 2.00)
+
+    Returns:
+        Lista de errores de validacion
+    """
+    errors = []
+
+    # tax_inclusive = tax_exclusive + tax_amount
+    expected_inclusive = tax_exclusive + tax_amount
+    diff = abs(tax_inclusive - expected_inclusive)
+    if diff > tolerance:
+        errors.append(
+            f"TaxInclusiveAmount ({tax_inclusive:.2f}) no cuadra con "
+            f"TaxExclusiveAmount ({tax_exclusive:.2f}) + "
+            f"TaxAmount ({tax_amount:.2f}). Diferencia: {diff:.2f}"
+        )
+
+    # payable_amount == tax_inclusive (normalmente)
+    diff_payable = abs(payable_amount - tax_inclusive)
+    if diff_payable > tolerance:
+        errors.append(
+            f"PayableAmount ({payable_amount:.2f}) no cuadra con "
+            f"TaxInclusiveAmount ({tax_inclusive:.2f}). "
+            f"Diferencia: {diff_payable:.2f}"
+        )
+
+    return errors
+
+
+def validate_credit_note_reference(
+    invoice_number: str,
+    invoice_cufe: str,
+    invoice_date: str,
+    response_code: str
+) -> List[str]:
+    """
+    Validar referencia de nota credito.
+
+    Args:
+        invoice_number: Numero de factura referenciada
+        invoice_cufe: CUFE de la factura referenciada
+        invoice_date: Fecha de la factura referenciada
+        response_code: Codigo de respuesta/motivo
+
+    Returns:
+        Lista de errores de validacion
+    """
+    errors = []
+
+    errors.extend(validate_not_empty(invoice_number, "Numero factura referenciada"))
+    errors.extend(validate_cufe_format(invoice_cufe, "CUFE factura referenciada"))
+    errors.extend(validate_date(invoice_date, "Fecha factura referenciada"))
+
+    valid_codes = {'1', '2', '3', '4', '5'}
+    if response_code not in valid_codes:
+        errors.append(
+            f"Codigo de respuesta invalido: {response_code}. "
+            f"Debe ser uno de: {', '.join(sorted(valid_codes))}"
+        )
+
+    return errors
+
+
+def validate_debit_note_reference(
+    invoice_number: str,
+    invoice_cufe: str,
+    invoice_date: str,
+    response_code: str
+) -> List[str]:
+    """
+    Validar referencia de nota debito.
+
+    Args:
+        invoice_number: Numero de factura referenciada
+        invoice_cufe: CUFE de la factura referenciada
+        invoice_date: Fecha de la factura referenciada
+        response_code: Codigo de respuesta/motivo
+
+    Returns:
+        Lista de errores de validacion
+    """
+    errors = []
+
+    errors.extend(validate_not_empty(invoice_number, "Numero factura referenciada"))
+    errors.extend(validate_cufe_format(invoice_cufe, "CUFE factura referenciada"))
+    errors.extend(validate_date(invoice_date, "Fecha factura referenciada"))
+
+    valid_codes = {'1', '2', '3', '4'}
+    if response_code not in valid_codes:
+        errors.append(
+            f"Codigo de respuesta invalido: {response_code}. "
+            f"Debe ser uno de: {', '.join(sorted(valid_codes))}"
+        )
+
+    return errors
+
+
+def validate_export_invoice(
+    destination_country: str,
+    currency: str,
+    valid_currencies: List[str] = None
+) -> List[str]:
+    """
+    Validar factura de exportacion.
+
+    Args:
+        destination_country: Pais de destino
+        currency: Moneda del documento
+        valid_currencies: Lista de monedas validas
+
+    Returns:
+        Lista de errores de validacion
+    """
+    errors = []
+
+    if valid_currencies is None:
+        valid_currencies = ['COP', 'USD', 'EUR', 'GBP', 'MXN', 'BRL', 'ARS',
+                            'CLP', 'PEN', 'JPY', 'CHF', 'CAD']
+
+    # Pais destino NO puede ser Colombia
+    if destination_country and destination_country.upper() == 'CO':
+        errors.append(
+            "Factura exportacion requiere pais destino diferente a Colombia"
+        )
+
+    # Moneda valida
+    if currency and currency.upper() not in valid_currencies:
+        errors.append(f"Moneda no valida para exportacion: {currency}")
+
+    return errors
+
+
+def validate_pos_limits(
+    total: float,
+    uvt_limit: int,
+    uvt_value: float
+) -> List[str]:
+    """
+    Validar limite de UVT para documento POS.
+
+    Args:
+        total: Total del documento
+        uvt_limit: Limite en UVT (normalmente 5)
+        uvt_value: Valor del UVT para el ano
+
+    Returns:
+        Lista de errores de validacion
+    """
+    errors = []
+
+    max_value = uvt_limit * uvt_value
+    if total > max_value:
+        errors.append(
+            f"Total ${total:,.2f} excede limite POS de {uvt_limit} UVT "
+            f"(${max_value:,.2f})"
+        )
+
+    return errors
+
+
+def calculate_remaining_in_range(
+    current: int,
+    range_to: int
+) -> int:
+    """
+    Calcular consecutivos restantes en el rango.
+
+    Args:
+        current: Consecutivo actual
+        range_to: Fin del rango autorizado
+
+    Returns:
+        Cantidad de consecutivos restantes
+    """
+    return max(0, range_to - current)
+
+
+def is_resolution_expiring_soon(
+    end_date: str,
+    days_warning: int = 30
+) -> bool:
+    """
+    Verificar si la resolucion esta proxima a vencer.
+
+    Args:
+        end_date: Fecha de fin de resolucion (YYYY-MM-DD)
+        days_warning: Dias de anticipacion para advertencia
+
+    Returns:
+        True si la resolucion vence en menos de days_warning dias
+    """
+    try:
+        end = datetime.strptime(end_date, '%Y-%m-%d')
+        today = datetime.now()
+        remaining = (end - today).days
+        return remaining <= days_warning
+    except ValueError:
+        return False
+
+
+class ProductionValidator:
+    """
+    Validador para ambiente de produccion DIAN.
+
+    Agrupa todas las validaciones necesarias antes de enviar
+    un documento a produccion.
+    """
+
+    def __init__(self, uvt_value: float = 47065.0):
+        """
+        Inicializar validador de produccion.
+
+        Args:
+            uvt_value: Valor UVT del ano actual
+        """
+        self.uvt_value = uvt_value
+
+    def validate_invoice_for_production(
+        self,
+        data: Any,
+        config: Any
+    ) -> List[str]:
+        """
+        Validar factura completa para produccion.
+
+        Args:
+            data: Datos de la factura
+            config: Configuracion de facturacion
+
+        Returns:
+            Lista de todos los errores encontrados
+        """
+        errors = []
+
+        # Validacion basica
+        validator = InvoiceValidator()
+        errors.extend(validator.validate(data, config))
+
+        # Validar fechas de resolucion
+        start_date = getattr(config, 'resolution_date', None)
+        end_date = getattr(config, 'resolution_end_date', None)
+        issue_date = getattr(data, 'issue_date', None)
+
+        if start_date and end_date and issue_date:
+            errors.extend(validate_resolution_dates(
+                start_date, end_date, issue_date
+            ))
+
+        return errors
+
+    def validate_credit_note_for_production(
+        self,
+        data: Any,
+        reference_number: str,
+        reference_cufe: str,
+        reference_date: str,
+        response_code: str
+    ) -> List[str]:
+        """
+        Validar nota credito para produccion.
+
+        Args:
+            data: Datos de la nota credito
+            reference_number: Numero de factura referenciada
+            reference_cufe: CUFE de factura referenciada
+            reference_date: Fecha de factura referenciada
+            response_code: Codigo de respuesta
+
+        Returns:
+            Lista de errores de validacion
+        """
+        errors = []
+
+        # Validar referencia
+        errors.extend(validate_credit_note_reference(
+            reference_number,
+            reference_cufe,
+            reference_date,
+            response_code
+        ))
+
+        return errors
+
+    def validate_pos_document(
+        self,
+        total: float,
+        uvt_limit: int = 5
+    ) -> List[str]:
+        """
+        Validar documento POS.
+
+        Args:
+            total: Total del documento
+            uvt_limit: Limite en UVT (default: 5)
+
+        Returns:
+            Lista de errores de validacion
+        """
+        return validate_pos_limits(total, uvt_limit, self.uvt_value)

@@ -203,22 +203,77 @@ class FachoTimeoutError(NetworkError):
 
 # Codigos de error DIAN conocidos
 DIAN_ERROR_CODES = {
+    # Errores de firma (ZE)
+    'ZE01': 'Firma no encontrada',
     'ZE02': 'Firma digital invalida',
     'ZE03': 'Certificado no valido',
     'ZE04': 'Certificado expirado',
+    'ZE05': 'Certificado revocado',
+    'ZE06': 'Certificado no corresponde al emisor',
+
+    # Errores de estructura XML (FAB)
+    'FAB01': 'XML mal formado',
+    'FAB02': 'Namespace incorrecto',
+    'FAB03': 'Elemento requerido faltante',
+    'FAB04': 'Valor de elemento invalido',
+    'FAB05': 'Atributo requerido faltante',
+
+    # Errores de CUFE/CUDE (FAC)
+    'FAC01': 'CUFE invalido',
+    'FAC02': 'Totales no cuadran',
+    'FAC03': 'Impuestos mal calculados',
+    'FAC04': 'CUDE invalido',
+    'FAC05': 'CUDS invalido',
+
+    # Errores de fecha (FAD)
+    'FAD01': 'Fecha emision invalida',
+    'FAD02': 'Fecha fuera de periodo autorizado',
+    'FAD03': 'Hora emision invalida',
+    'FAD04': 'Fecha de vencimiento invalida',
+
+    # Errores de emisor (FAJ)
     'FAJ43a': 'Nombre emisor no informado',
     'FAJ43b': 'Nombre emisor no coincide con RUT',
     'FAJ44a': 'NIT emisor no informado',
     'FAJ44b': 'NIT emisor no coincide con RUT',
-    'FAB01': 'XML mal formado',
-    'FAB02': 'Namespace incorrecto',
-    'FAB03': 'Elemento requerido faltante',
+    'FAJ45': 'Direccion emisor no informada',
+    'FAJ46': 'Municipio emisor invalido',
+
+    # Errores de numeracion (FAN)
     'FAN01': 'Numero de factura duplicado',
     'FAN02': 'Consecutivo fuera de rango',
     'FAN03': 'Resolucion vencida',
-    'FAC01': 'CUFE invalido',
-    'FAC02': 'Totales no cuadran',
-    'FAC03': 'Impuestos mal calculados',
+    'FAN04': 'Prefijo no corresponde a resolucion',
+    'FAN05': 'Resolucion no encontrada',
+
+    # Errores de notas credito/debito (NC/ND)
+    'NCB01': 'Factura referenciada no existe',
+    'NCB02': 'CUFE de factura referenciada invalido',
+    'NCB03': 'Fecha de factura referenciada invalida',
+    'NCB04': 'Codigo de respuesta invalido',
+    'NDB01': 'Factura referenciada no existe',
+    'NDB02': 'CUFE de factura referenciada invalido',
+
+    # Errores de documento soporte (DS)
+    'DSB01': 'Proveedor no valido para documento soporte',
+    'DSB02': 'Regimen fiscal del proveedor invalido',
+    'DSB03': 'CUDS invalido',
+
+    # Errores de adquiriente (FAK)
+    'FAK01': 'NIT adquiriente no informado',
+    'FAK02': 'Nombre adquiriente no informado',
+    'FAK03': 'Tipo documento adquiriente invalido',
+
+    # Errores de lineas (FAL)
+    'FAL01': 'Cantidad debe ser mayor a cero',
+    'FAL02': 'Precio unitario invalido',
+    'FAL03': 'Descripcion de producto requerida',
+    'FAL04': 'Codigo de producto invalido',
+
+    # Errores de software (SFT)
+    'SFT01': 'Software ID invalido',
+    'SFT02': 'Software PIN invalido',
+    'SFT03': 'Software Security Code invalido',
 }
 
 
@@ -247,3 +302,174 @@ def parse_dian_errors(error_messages: List[str]) -> List[Dict[str, str]]:
         })
 
     return parsed
+
+
+# =============================================================================
+# EXCEPCIONES ESPECIFICAS
+# =============================================================================
+
+class CertificateExpiredError(CertificateError):
+    """Error de certificado expirado."""
+
+    def __init__(self, message: str, expiry_date: str = None):
+        super().__init__(message)
+        self.code = "ZE04"
+        self.expiry_date = expiry_date
+
+
+class CertificateRevokedError(CertificateError):
+    """Error de certificado revocado."""
+
+    def __init__(self, message: str, revocation_date: str = None):
+        super().__init__(message)
+        self.code = "ZE05"
+        self.revocation_date = revocation_date
+
+
+class DuplicateInvoiceError(DianError):
+    """Error de factura duplicada."""
+
+    def __init__(self, invoice_number: str, existing_cufe: str = None):
+        super().__init__(
+            f"Factura {invoice_number} ya existe en DIAN",
+            status_code='FAN01',
+            dian_errors=[f"Documento duplicado: {invoice_number}"]
+        )
+        self.invoice_number = invoice_number
+        self.existing_cufe = existing_cufe
+
+
+class ResolutionExpiredError(ValidationError):
+    """Error de resolucion vencida."""
+
+    def __init__(self, resolution_number: str, end_date: str):
+        super().__init__(
+            f"Resolucion {resolution_number} vencio el {end_date}",
+            errors=[f"Resolucion vencida: {end_date}"],
+            code="FAN03"
+        )
+        self.resolution_number = resolution_number
+        self.end_date = end_date
+
+
+class ResolutionNotFoundError(ValidationError):
+    """Error de resolucion no encontrada."""
+
+    def __init__(self, resolution_number: str):
+        super().__init__(
+            f"Resolucion {resolution_number} no encontrada",
+            errors=[f"Resolucion no encontrada: {resolution_number}"],
+            code="FAN05"
+        )
+        self.resolution_number = resolution_number
+
+
+class CufeValidationError(CufeError):
+    """Error de validacion de CUFE."""
+
+    def __init__(self, cufe: str, expected_length: int = 96):
+        actual_length = len(cufe) if cufe else 0
+        super().__init__(
+            f"CUFE invalido: esperado {expected_length} caracteres, "
+            f"recibido {actual_length}",
+            document_number=None
+        )
+        self.cufe = cufe
+        self.expected_length = expected_length
+        self.actual_length = actual_length
+
+
+class ReferenceNotFoundError(DianError):
+    """Error de referencia de factura no encontrada (para notas)."""
+
+    def __init__(
+        self,
+        invoice_number: str,
+        invoice_cufe: str = None,
+        doc_type: str = 'nota credito'
+    ):
+        super().__init__(
+            f"Factura referenciada {invoice_number} no existe en DIAN",
+            status_code='NCB01' if doc_type == 'nota credito' else 'NDB01',
+            dian_errors=[f"Factura referenciada no existe: {invoice_number}"]
+        )
+        self.invoice_number = invoice_number
+        self.invoice_cufe = invoice_cufe
+        self.doc_type = doc_type
+
+
+class TotalsValidationError(ValidationError):
+    """Error de validacion de totales."""
+
+    def __init__(
+        self,
+        expected: float,
+        actual: float,
+        field: str = "total"
+    ):
+        diff = abs(expected - actual)
+        super().__init__(
+            f"Totales no cuadran: {field}",
+            errors=[
+                f"Valor esperado: {expected:.2f}",
+                f"Valor actual: {actual:.2f}",
+                f"Diferencia: {diff:.2f}"
+            ],
+            field=field,
+            code="FAC02"
+        )
+        self.expected = expected
+        self.actual = actual
+        self.difference = diff
+
+
+class UvtLimitExceededError(ValidationError):
+    """Error de limite UVT excedido (para documentos POS)."""
+
+    def __init__(self, total: float, uvt_limit: int, uvt_value: float):
+        max_value = uvt_limit * uvt_value
+        super().__init__(
+            f"Total ${total:,.2f} excede limite de {uvt_limit} UVT "
+            f"(${max_value:,.2f})",
+            errors=[f"Limite POS excedido: {total:.2f} > {max_value:.2f}"],
+            code="POS_LIMIT_EXCEEDED"
+        )
+        self.total = total
+        self.uvt_limit = uvt_limit
+        self.uvt_value = uvt_value
+        self.max_value = max_value
+
+
+def create_dian_exception(error_code: str, message: str = None) -> FachoError:
+    """
+    Crear excepcion apropiada basada en codigo de error DIAN.
+
+    Args:
+        error_code: Codigo de error DIAN (ej: 'ZE04', 'FAN01')
+        message: Mensaje adicional (opcional)
+
+    Returns:
+        Excepcion apropiada para el codigo de error
+    """
+    description = DIAN_ERROR_CODES.get(error_code, f"Error DIAN: {error_code}")
+    full_message = f"{description}: {message}" if message else description
+
+    # Mapear codigos a excepciones especificas
+    if error_code == 'ZE04':
+        return CertificateExpiredError(full_message)
+    elif error_code == 'ZE05':
+        return CertificateRevokedError(full_message)
+    elif error_code in ('ZE01', 'ZE02', 'ZE03', 'ZE06'):
+        return SignatureError(full_message)
+    elif error_code == 'FAN01':
+        return DuplicateInvoiceError("", None)
+    elif error_code == 'FAN03':
+        return ResolutionExpiredError("", "")
+    elif error_code in ('NCB01', 'NCB02', 'NDB01', 'NDB02'):
+        return ReferenceNotFoundError("")
+    elif error_code in ('FAC01', 'FAC04', 'FAC05'):
+        return CufeError(full_message)
+    elif error_code == 'FAC02':
+        return TotalsValidationError(0, 0)
+    else:
+        return DianError(full_message, status_code=error_code)

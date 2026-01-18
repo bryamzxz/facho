@@ -3,17 +3,28 @@
 
 """
 Constructor de notas debito UBL 2.1 para DIAN Colombia.
-Basado en implementacion funcional aprobada por DIAN.
+
+Diferencias clave vs Factura y Nota Credito:
+- CustomizationID: '30'
+- ProfileID: 'DIAN 2.1: Nota Debito de Factura Electronica de Venta'
+- Usa CUDE calculado con SoftwarePIN
+- Usa RequestedMonetaryTotal (NO LegalMonetaryTotal)
+- Lineas son DebitNoteLine con DebitedQuantity
+- Codigos de respuesta diferentes (1-4)
 """
 
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from dataclasses import dataclass
-import hashlib
 
 from lxml import etree
 
-from .constants import NS, DIAN_PROFILE_ID_DEBIT_NOTE, DEBIT_NOTE_TYPE_CODE
+from .constants import (
+    NS, DIAN_PROFILE_ID_DEBIT_NOTE, DEBIT_NOTE_TYPE_CODE,
+    DEBIT_NOTE_RESPONSE_CODES
+)
+from .cufe import CufeInput, calculate_cude, calculate_software_security_code
+from .validators import validate_debit_note_reference
 from .invoice_builder import (
     InvoiceBuilder,
     InvoiceConfig,
@@ -24,23 +35,45 @@ from .invoice_builder import (
 )
 
 
-# Motivos para notas debito (ResponseCode)
-DEBIT_REASONS = {
-    '1': 'Intereses',
-    '2': 'Gastos por cobrar',
-    '3': 'Cambio del valor',
-    '4': 'Otros',
-}
-
-
 @dataclass
 class DebitNoteData(InvoiceData):
-    """Datos de nota debito."""
-    billing_reference_id: str = ''  # Numero de factura referenciada
-    billing_reference_uuid: str = ''  # CUFE de factura referenciada
-    billing_reference_date: str = ''  # Fecha de factura referenciada
-    discrepancy_response_code: str = '1'  # 1=Intereses, 2=Gastos, 3=Cambio valor, 4=Otros
+    """
+    Datos de nota debito.
+
+    Attributes:
+        billing_reference_id: Numero de factura referenciada (ej: 'SETP990000001')
+        billing_reference_uuid: CUFE de la factura referenciada (96 caracteres)
+        billing_reference_date: Fecha de la factura referenciada (YYYY-MM-DD)
+        discrepancy_response_code: Codigo de respuesta DIAN:
+            - '1': Intereses (default)
+            - '2': Gastos por cobrar
+            - '3': Cambio del valor
+            - '4': Otros
+        discrepancy_description: Descripcion del motivo (opcional)
+    """
+    billing_reference_id: str = ''
+    billing_reference_uuid: str = ''
+    billing_reference_date: str = ''
+    discrepancy_response_code: str = '1'
     discrepancy_description: str = ''
+
+    @property
+    def response_description(self) -> str:
+        """Obtener descripcion del codigo de respuesta."""
+        if self.discrepancy_description:
+            return self.discrepancy_description
+        return DEBIT_NOTE_RESPONSE_CODES.get(
+            self.discrepancy_response_code, 'Otros'
+        )
+
+    def validate_reference(self) -> List[str]:
+        """Validar la referencia a la factura original."""
+        return validate_debit_note_reference(
+            self.billing_reference_id,
+            self.billing_reference_uuid,
+            self.billing_reference_date,
+            self.discrepancy_response_code
+        )
 
 
 class DebitNoteBuilder(InvoiceBuilder):
@@ -50,16 +83,32 @@ class DebitNoteBuilder(InvoiceBuilder):
     Genera XML valido segun Anexo Tecnico v1.9.
     """
 
-    def build(self, debit_note_data: DebitNoteData) -> etree._Element:
+    def build(self, debit_note_data: DebitNoteData, validate: bool = True) -> etree._Element:
         """
         Construir nota debito XML.
 
+        IMPORTANTE: Nota debito usa RequestedMonetaryTotal, NO LegalMonetaryTotal.
+
         Args:
             debit_note_data: Datos de la nota debito
+            validate: Si se deben validar los datos antes de construir
 
         Returns:
             Elemento XML de la nota debito
+
+        Raises:
+            ValidationError: Si los datos no son validos
         """
+        # Validar referencia si se solicita
+        if validate:
+            errors = debit_note_data.validate_reference()
+            if errors:
+                from .exceptions import ValidationError
+                raise ValidationError(
+                    "Referencia de nota debito invalida",
+                    errors=errors
+                )
+
         # Calcular totales
         subtotal = sum(
             line.quantity * line.unit_price
@@ -71,20 +120,25 @@ class DebitNoteBuilder(InvoiceBuilder):
         )
         total = subtotal + tax_iva
 
-        # Calcular CUDE (para notas debito se usa CUDE, no CUFE)
-        from ..client.dian_simple import calcular_software_security_code
-
-        # CUDE = SHA384(NumDoc + FecDoc + HoraDoc + ValorBruto + 01 + ValorIVA + 04 + 0 + 03 + 0 +
-        #               ValorTotal + NitEmisor + NumAdquiriente + SoftwarePIN + TipoAmbiente)
-        cadena = (
-            f"{debit_note_data.number}{debit_note_data.issue_date}{debit_note_data.issue_time}"
-            f"{subtotal:.2f}01{tax_iva:.2f}04{0:.2f}03{0:.2f}"
-            f"{total:.2f}{self.config.nit}{debit_note_data.customer.nit}"
-            f"{self.config.software_pin}{self.config.environment}"
+        # Calcular CUDE usando el modulo cufe.py
+        # CUDE usa SoftwarePIN en lugar de ClaveTecnica
+        cufe_input = CufeInput(
+            number=debit_note_data.number,
+            issue_date=debit_note_data.issue_date,
+            issue_time=debit_note_data.issue_time,
+            subtotal=subtotal,
+            iva_amount=tax_iva,
+            inc_amount=0.0,
+            ica_amount=0.0,
+            total=total,
+            supplier_nit=self.config.nit,
+            customer_nit=debit_note_data.customer.nit,
+            technical_key=self.config.software_pin,  # PIN para CUDE
+            environment=self.config.environment,
         )
-        cude = hashlib.sha384(cadena.encode('utf-8')).hexdigest()
+        cude = calculate_cude(cufe_input)
 
-        software_security_code = calcular_software_security_code(
+        software_security_code = calculate_software_security_code(
             self.config.software_id,
             self.config.software_pin,
             debit_note_data.number
@@ -269,7 +323,14 @@ class DebitNoteBuilder(InvoiceBuilder):
         debit_note: etree._Element,
         debit_note_data: DebitNoteData
     ):
-        """Agregar respuesta de discrepancia."""
+        """
+        Agregar respuesta de discrepancia.
+
+        El DiscrepancyResponse es REQUERIDO para notas debito y contiene:
+        - ReferenceID: Numero de factura referenciada
+        - ResponseCode: Codigo del motivo (1-4)
+        - Description: Descripcion del motivo
+        """
         disc_resp = etree.SubElement(debit_note, '{%s}DiscrepancyResponse' % NS['cac'])
         etree.SubElement(
             disc_resp, '{%s}ReferenceID' % NS['cbc']
@@ -277,10 +338,9 @@ class DebitNoteBuilder(InvoiceBuilder):
         etree.SubElement(
             disc_resp, '{%s}ResponseCode' % NS['cbc']
         ).text = debit_note_data.discrepancy_response_code
-
-        description = debit_note_data.discrepancy_description or \
-            DEBIT_REASONS.get(debit_note_data.discrepancy_response_code, 'Otros')
-        etree.SubElement(disc_resp, '{%s}Description' % NS['cbc']).text = description
+        etree.SubElement(
+            disc_resp, '{%s}Description' % NS['cbc']
+        ).text = debit_note_data.response_description
 
     def _add_billing_reference(
         self,
