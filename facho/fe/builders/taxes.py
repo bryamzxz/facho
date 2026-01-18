@@ -371,6 +371,133 @@ class Tax:
             is_withholding=True
         )
 
+    @classmethod
+    def from_line(cls, line_total: float, tax_code: str, percent: float) -> 'Tax':
+        """
+        Crear impuesto para una linea de factura.
+
+        Args:
+            line_total: Total de la linea (cantidad * precio)
+            tax_code: Codigo del impuesto ('01', '03', '04', etc.)
+            percent: Porcentaje del impuesto
+
+        Returns:
+            Instancia de Tax para la linea
+        """
+        return cls(
+            code=tax_code,
+            percent=percent,
+            taxable_amount=line_total
+        )
+
+    @classmethod
+    def no_iva(cls, taxable_amount: float) -> 'Tax':
+        """
+        Crear impuesto IVA 0% para no responsables.
+
+        Args:
+            taxable_amount: Base gravable
+
+        Returns:
+            Instancia de Tax con IVA 0%
+        """
+        return cls(
+            code='01',
+            name='IVA',
+            percent=0.0,
+            taxable_amount=taxable_amount,
+            is_withholding=False
+        )
+
+    @classmethod
+    def inc_4(cls, taxable_amount: float) -> 'Tax':
+        """
+        INC 4% (bolsas plasticas, algunos servicios).
+
+        Args:
+            taxable_amount: Base gravable
+        """
+        return cls.inc(4.0, taxable_amount)
+
+    @classmethod
+    def inc_8(cls, taxable_amount: float) -> 'Tax':
+        """
+        INC 8% (restaurantes).
+
+        Args:
+            taxable_amount: Base gravable
+        """
+        return cls.inc(8.0, taxable_amount)
+
+    @classmethod
+    def inc_16(cls, taxable_amount: float) -> 'Tax':
+        """
+        INC 16% (telecomunicaciones, vehiculos).
+
+        Args:
+            taxable_amount: Base gravable
+        """
+        return cls.inc(16.0, taxable_amount)
+
+    @classmethod
+    def export_exempt(cls, taxable_amount: float) -> 'Tax':
+        """
+        Crear IVA exento por exportacion (codigo 06).
+
+        Args:
+            taxable_amount: Base gravable
+
+        Returns:
+            Instancia de Tax exento por exportacion
+        """
+        return cls(
+            code='06',
+            name='IVA Exento Exportacion',
+            percent=0.0,
+            taxable_amount=taxable_amount,
+            is_withholding=False
+        )
+
+    def to_dict(self) -> dict:
+        """
+        Convertir a diccionario para serializacion.
+
+        Returns:
+            Diccionario con los datos del impuesto
+        """
+        return {
+            'code': self.code,
+            'name': self.name,
+            'percent': self.percent,
+            'taxable_amount': self.taxable_amount,
+            'amount': self.amount,
+            'is_withholding': self.is_withholding,
+            'unit_amount': self.unit_amount,
+            'per_unit_code': self.per_unit_code,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Tax':
+        """
+        Crear desde diccionario.
+
+        Args:
+            data: Diccionario con los datos del impuesto
+
+        Returns:
+            Instancia de Tax
+        """
+        return cls(
+            code=data['code'],
+            percent=data.get('percent', 0.0),
+            taxable_amount=data.get('taxable_amount', 0.0),
+            amount=data.get('amount'),
+            name=data.get('name'),
+            is_withholding=data.get('is_withholding'),
+            unit_amount=data.get('unit_amount'),
+            per_unit_code=data.get('per_unit_code'),
+        )
+
 
 @dataclass
 class TaxTotal:

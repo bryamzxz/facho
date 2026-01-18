@@ -2,20 +2,18 @@
 # this repository contains the full copyright notices and license terms.
 
 """
-Constructor de Documento Soporte (tipo 05) para DIAN Colombia.
-
-El Documento Soporte se usa para compras a personas naturales
-no obligadas a expedir factura.
+Constructor de Documento Equivalente POS (tipo 03) para DIAN Colombia.
 
 Caracteristicas:
-- Usa CUDS (no CUFE ni CUDE)
-- ProfileID especifico para documento soporte
-- Proveedor es el NO obligado a facturar (regimen R-99-PN)
-- El emisor del documento es el COMPRADOR, no el vendedor
+- Para ventas menores a 5 UVT
+- Cliente puede ser consumidor final generico (222222222222)
+- Usa CUDE (no CUFE)
+- Requiere numero de caja/terminal
 """
 
+from datetime import datetime
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Optional
 from lxml import etree
 
 from .constants import (
@@ -24,38 +22,33 @@ from .constants import (
     DIAN_UBL_VERSION,
     COUNTRY_ID_ATTRS,
     AUTHORIZATION_PROVIDER_ID,
+    GENERIC_CONSUMER,
+    UVT_VALUES,
 )
 from .taxes import (
     Tax,
-    TaxTotal,
     agrupar_impuestos,
     separar_impuestos_retenciones,
     calcular_totales_impuestos,
     truncar,
     formato_dinero,
 )
+from .cufe import CufeInput, calculate_cude, calculate_software_security_code
 from .invoice_builder import InvoiceBuilder, InvoiceConfig, InvoiceLine, Party, Address
-from .exceptions import ValidationError, XmlBuildError
-from .validators import validate_before_build
-from ..client.dian_simple import (
-    calcular_dv,
-    calcular_cude_flexible,
-    calcular_software_security_code,
-)
+from .exceptions import ValidationError, XmlBuildError, UvtLimitExceededError
+from .validators import validate_before_build, validate_pos_limits
+from ..client.dian_simple import calcular_dv
 
 
-SUPPORT_DOCUMENT_TYPE_CODE = '05'
-SUPPORT_DOCUMENT_PROFILE_ID = (
-    'DIAN 2.1: documento soporte en adquisiciones efectuadas '
-    'a no obligados a facturar'
-)
-SUPPORT_DOCUMENT_CUSTOMIZATION_ID = '05'
+POS_DOCUMENT_TYPE_CODE = '03'
+POS_DOCUMENT_PROFILE_ID = 'DIAN 2.1: Factura Electronica de Venta'
+POS_UVT_LIMIT = 5  # Limite de 5 UVT para documento POS
 
 
 @dataclass
-class SupportDocumentData:
+class PosDocumentData:
     """
-    Datos del documento soporte.
+    Datos del documento equivalente POS.
 
     Attributes:
         number: Numero del documento
@@ -63,72 +56,126 @@ class SupportDocumentData:
         issue_time: Hora de emision (HH:MM:SS-05:00)
         due_date: Fecha de vencimiento (opcional)
         note: Nota del documento
-        buyer: Quien compra y emite el documento
-        seller: Quien vende (no obligado a facturar)
+        supplier: Datos del vendedor
+        customer: Datos del comprador (puede ser consumidor generico)
         lines: Lineas del documento
+        terminal_id: ID de la caja/terminal POS
+        sequence_prefix: Prefijo de consecutivo (opcional)
         payment_means_code: Codigo de medio de pago (default '10' = efectivo)
     """
     number: str
     issue_date: str
     issue_time: str
     due_date: str = None
-    note: str = 'Documento soporte en adquisiciones'
-    buyer: Party = None      # Quien compra y emite el documento
-    seller: Party = None     # Quien vende (no obligado a facturar)
+    note: str = 'Documento equivalente POS'
+    supplier: Party = None
+    customer: Party = None
     lines: List[InvoiceLine] = field(default_factory=list)
+    terminal_id: str = ''
+    sequence_prefix: str = 'POS'
     payment_means_code: str = '10'
 
-    # Para compatibilidad con validador
-    @property
-    def supplier(self):
-        """Alias para buyer (compatibilidad con validador)."""
-        return self.buyer
+    def use_generic_consumer(self):
+        """Establecer cliente como consumidor final generico."""
+        self.customer = Party(
+            nit=GENERIC_CONSUMER['nit'],
+            name=GENERIC_CONSUMER['name'],
+            legal_name=GENERIC_CONSUMER['name'],
+            scheme_name=GENERIC_CONSUMER['doc_type'],
+            organization_code='2',  # Persona natural
+        )
 
-    @property
-    def customer(self):
-        """Alias para seller (compatibilidad con validador)."""
-        return self.seller
+    @staticmethod
+    def get_uvt_value(year: int = None) -> float:
+        """
+        Obtener valor UVT del ano.
+
+        Args:
+            year: Ano (default: ano actual)
+
+        Returns:
+            Valor del UVT
+        """
+        if year is None:
+            year = datetime.now().year
+        return UVT_VALUES.get(year, UVT_VALUES[max(UVT_VALUES.keys())])
+
+    def get_max_value(self, year: int = None) -> float:
+        """
+        Obtener valor maximo para documento POS.
+
+        Args:
+            year: Ano (default: ano actual)
+
+        Returns:
+            Valor maximo permitido
+        """
+        return POS_UVT_LIMIT * self.get_uvt_value(year)
 
 
-class SupportDocumentBuilder(InvoiceBuilder):
+class PosDocumentBuilder(InvoiceBuilder):
     """
-    Constructor de Documento Soporte para DIAN.
+    Constructor de Documento Equivalente POS para DIAN.
 
-    El Documento Soporte se utiliza cuando una empresa realiza
-    compras a personas naturales que no estan obligadas a facturar.
+    El documento POS se utiliza para ventas de bajo monto
+    (menores a 5 UVT).
 
     Example:
         config = InvoiceConfig(...)
 
-        buyer = Party(nit='900123456', name='MI EMPRESA', ...)
-        seller = Party(nit='12345678', scheme_name='13', ...)  # Cedula
-
-        data = SupportDocumentData(
-            number='DS0001',
+        data = PosDocumentData(
+            number='POS0001',
             issue_date='2024-01-15',
             issue_time='10:30:00-05:00',
-            buyer=buyer,
-            seller=seller,
-            lines=[InvoiceLine(..., taxes=[Tax.rete_fte(11.0, 100000)])]
+            supplier=supplier,
+            terminal_id='CAJA001',
+            lines=[InvoiceLine(...)]
         )
+        # Usar consumidor generico si no se tiene cliente
+        data.use_generic_consumer()
 
-        builder = SupportDocumentBuilder(config)
+        builder = PosDocumentBuilder(config)
         xml = builder.build(data)
     """
 
-    def build(self, data: SupportDocumentData) -> etree._Element:
+    def __init__(self, config: InvoiceConfig, uvt_year: int = None):
         """
-        Construir XML de documento soporte.
+        Inicializar builder POS.
 
         Args:
-            data: Datos del documento soporte
+            config: Configuracion de facturacion
+            uvt_year: Ano para calcular valor UVT (default: ano actual)
+        """
+        super().__init__(config)
+        self.uvt_year = uvt_year or datetime.now().year
+        self.uvt_value = UVT_VALUES.get(
+            self.uvt_year,
+            UVT_VALUES[max(UVT_VALUES.keys())]
+        )
+        self.uvt_limit = POS_UVT_LIMIT
+        self.max_value = self.uvt_limit * self.uvt_value
+
+    def build(self, data: PosDocumentData, validate_uvt: bool = True) -> etree._Element:
+        """
+        Construir XML de documento POS.
+
+        Args:
+            data: Datos del documento POS
+            validate_uvt: Si se debe validar el limite UVT
 
         Returns:
             Elemento XML del documento
+
+        Raises:
+            UvtLimitExceededError: Si el total excede el limite de 5 UVT
         """
         try:
+            # Si no hay cliente, usar generico
+            if data.customer is None:
+                data.use_generic_consumer()
+
             # Validar datos
-            validate_before_build(data, self.config, "documento soporte")
+            validate_before_build(data, self.config, "documento POS")
 
             # Calcular subtotal
             subtotal = truncar(sum(
@@ -149,26 +196,38 @@ class SupportDocumentBuilder(InvoiceBuilder):
 
             # Agrupar para XML
             impuestos_agrupados = agrupar_impuestos(impuestos)
-            retenciones_agrupadas = agrupar_impuestos(retenciones)
 
             # Total documento
             total = truncar(subtotal + total_impuestos)
 
-            # Calcular CUDE (documento soporte usa CUDE, no CUFE)
-            cude = calcular_cude_flexible(
-                numero=data.number,
-                fecha_emision=data.issue_date,
-                hora_emision=data.issue_time,
-                subtotal=subtotal,
-                impuestos=totales_impuestos,
-                total=total,
-                nit_emisor=self.config.nit,
-                nit_adquiriente=data.seller.nit,
-                software_pin=self.config.software_pin,
-                tipo_ambiente=self.config.environment
-            )
+            # Validar limite UVT
+            if validate_uvt:
+                errors = validate_pos_limits(total, self.uvt_limit, self.uvt_value)
+                if errors:
+                    raise UvtLimitExceededError(
+                        total=total,
+                        uvt_limit=self.uvt_limit,
+                        uvt_value=self.uvt_value
+                    )
 
-            software_security_code = calcular_software_security_code(
+            # Calcular CUDE (documento POS usa CUDE con SoftwarePIN)
+            cufe_input = CufeInput(
+                number=data.number,
+                issue_date=data.issue_date,
+                issue_time=data.issue_time,
+                subtotal=subtotal,
+                iva_amount=totales_impuestos.get('01', 0.0),
+                inc_amount=totales_impuestos.get('04', 0.0),
+                ica_amount=totales_impuestos.get('03', 0.0),
+                total=total,
+                supplier_nit=self.config.nit,
+                customer_nit=data.customer.nit,
+                technical_key=self.config.software_pin,  # PIN para CUDE
+                environment=self.config.environment,
+            )
+            cude = calculate_cude(cufe_input)
+
+            software_security_code = calculate_software_security_code(
                 self.config.software_id,
                 self.config.software_pin,
                 data.number
@@ -187,7 +246,7 @@ class SupportDocumentBuilder(InvoiceBuilder):
             doc = etree.Element('Invoice', nsmap=nsmap)
 
             # UBLExtensions
-            self._add_ubl_extensions_support(
+            self._add_ubl_extensions_pos(
                 doc, data, cude, software_security_code
             )
 
@@ -197,10 +256,10 @@ class SupportDocumentBuilder(InvoiceBuilder):
             ).text = DIAN_UBL_VERSION
             etree.SubElement(
                 doc, '{%s}CustomizationID' % NS['cbc']
-            ).text = SUPPORT_DOCUMENT_CUSTOMIZATION_ID
+            ).text = '10'
             etree.SubElement(
                 doc, '{%s}ProfileID' % NS['cbc']
-            ).text = SUPPORT_DOCUMENT_PROFILE_ID
+            ).text = POS_DOCUMENT_PROFILE_ID
             etree.SubElement(
                 doc, '{%s}ProfileExecutionID' % NS['cbc']
             ).text = self.config.environment
@@ -208,10 +267,10 @@ class SupportDocumentBuilder(InvoiceBuilder):
                 doc, '{%s}ID' % NS['cbc']
             ).text = data.number
 
-            # UUID (CUDS - Codigo Unico de Documento Soporte)
+            # UUID (CUDE)
             uuid_el = etree.SubElement(doc, '{%s}UUID' % NS['cbc'])
             uuid_el.set('schemeID', self.config.environment)
-            uuid_el.set('schemeName', 'CUDS-SHA384')
+            uuid_el.set('schemeName', 'CUDE-SHA384')
             uuid_el.text = cude
 
             # Fechas
@@ -228,11 +287,17 @@ class SupportDocumentBuilder(InvoiceBuilder):
 
             # Tipo de documento
             inv_type = etree.SubElement(doc, '{%s}InvoiceTypeCode' % NS['cbc'])
-            inv_type.text = SUPPORT_DOCUMENT_TYPE_CODE
+            inv_type.text = POS_DOCUMENT_TYPE_CODE
 
             # Nota
             if data.note:
                 etree.SubElement(doc, '{%s}Note' % NS['cbc']).text = data.note
+
+            # Terminal ID en nota adicional
+            if data.terminal_id:
+                etree.SubElement(
+                    doc, '{%s}Note' % NS['cbc']
+                ).text = f"Terminal: {data.terminal_id}"
 
             # Moneda
             doc_currency = etree.SubElement(
@@ -251,9 +316,9 @@ class SupportDocumentBuilder(InvoiceBuilder):
                 doc, '{%s}LineCountNumeric' % NS['cbc']
             ).text = str(len(data.lines))
 
-            # Partes (buyer es el emisor, seller es el proveedor)
-            self._add_supplier(doc, data.buyer)
-            self._add_customer(doc, data.seller)
+            # Partes
+            self._add_supplier(doc, data.supplier)
+            self._add_customer(doc, data.customer)
 
             # Medio de pago
             payment = etree.SubElement(doc, '{%s}PaymentMeans' % NS['cac'])
@@ -269,10 +334,6 @@ class SupportDocumentBuilder(InvoiceBuilder):
             if impuestos_agrupados:
                 self._add_tax_totals(doc, impuestos_agrupados)
 
-            # Retenciones
-            if retenciones_agrupadas:
-                self._add_withholding_tax_totals(doc, retenciones_agrupadas)
-
             # Totales monetarios
             self._add_monetary_total(doc, subtotal, total_impuestos, total)
 
@@ -281,21 +342,21 @@ class SupportDocumentBuilder(InvoiceBuilder):
 
             return doc
 
-        except ValidationError:
+        except (ValidationError, UvtLimitExceededError):
             raise
         except Exception as e:
             raise XmlBuildError(
-                f"Error construyendo documento soporte: {str(e)}"
+                f"Error construyendo documento POS: {str(e)}"
             )
 
-    def _add_ubl_extensions_support(
+    def _add_ubl_extensions_pos(
         self,
         doc: etree._Element,
-        data: SupportDocumentData,
+        data: PosDocumentData,
         cude: str,
         software_security_code: str
     ):
-        """Agregar UBLExtensions para documento soporte."""
+        """Agregar UBLExtensions para documento POS."""
         extensions = etree.SubElement(doc, '{%s}UBLExtensions' % NS['ext'])
 
         # Extension 1: DIAN Extensions

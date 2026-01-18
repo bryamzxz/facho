@@ -24,6 +24,10 @@ from .utils import sha256_digest
 # CONSTANTES
 # =============================================================================
 
+# IMPORTANTE: Para documentos UBL (facturas, notas) se usa C14N INCLUSIVO
+# (exclusive=False). Para SOAP WS-Security se usa C14N EXCLUSIVO.
+# Esta diferencia es CRITICA para la validacion de firma DIAN.
+
 # Namespaces para firma
 NS = {
     'fe': 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
